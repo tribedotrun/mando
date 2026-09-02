@@ -1,8 +1,10 @@
 //! /api/sessions/* route handlers.
 
+use axum::body::Body;
 use axum::extract::{Path, Query, State};
-use axum::http::StatusCode;
+use axum::http::{header, StatusCode};
 use axum::Json;
+use base64::Engine;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
@@ -103,6 +105,48 @@ pub(crate) async fn get_session_events(
         events: snapshot.events,
         is_running: snapshot.is_running,
     }))
+}
+
+/// GET /api/sessions/{id}/images/{tool}/{index}
+///
+/// Serves one image embedded in a Claude Code tool result. Raw base64 stays
+/// out of the transcript snapshot and crosses the wire only when an image is
+/// actually visible in the transcript UI.
+pub(crate) async fn get_session_tool_result_image(
+    State(state): State<AppState>,
+    Path(api_types::SessionToolResultImageParams { id, tool, index }): Path<
+        api_types::SessionToolResultImageParams,
+    >,
+) -> Result<axum::response::Response<Body>, ApiError> {
+    let image = state
+        .sessions
+        .tool_result_image(&id, &tool, index as usize)
+        .await
+        .map_err(|e| internal_error(e, "failed to load session tool-result image"))?
+        .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "tool-result image not found"))?;
+
+    let content_type = match image.media_type.as_str() {
+        "image/png" => "image/png",
+        "image/jpeg" => "image/jpeg",
+        "image/gif" => "image/gif",
+        "image/webp" => "image/webp",
+        _ => {
+            return Err(error_response(
+                StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                "unsupported tool-result image type",
+            ));
+        }
+    };
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(image.base64_data)
+        .map_err(|e| internal_error(e, "invalid base64 in session tool-result image"))?;
+
+    axum::response::Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, content_type)
+        .header(header::CACHE_CONTROL, "private, max-age=3600")
+        .body(Body::from(bytes))
+        .map_err(|e| internal_error(e, "failed to build session tool-result image response"))
 }
 
 /// GET /api/sessions/{id}/jsonl-path

@@ -68,8 +68,20 @@ pub fn rate_for_model(model: &str) -> ModelRate {
     // regardless of source.
     let lower = model.to_ascii_lowercase();
 
-    // Fable: top tier, and its own family — the alias `fable` and the full
-    // id `claude-fable-5` both land here.
+    // Fable 5.1 keeps Fable 5's base rates but reads cache at $0.25/MTok,
+    // a quarter of Fable 5's $1.00, so the id arm has to win over the
+    // family substring below.
+    if lower.contains("fable-5-1") {
+        return ModelRate {
+            input_per_mtok: 10.0,
+            output_per_mtok: 50.0,
+            cache_creation_per_mtok: 12.5,
+            cache_read_per_mtok: 0.25,
+        };
+    }
+
+    // Fable: top tier, and its own family — `claude-fable-5` and any fable
+    // id without its own arm land here.
     if lower.contains("fable") {
         return fable_rate();
     }
@@ -188,6 +200,26 @@ mod tests {
             assert!((rate.cache_creation_per_mtok - 12.5).abs() < 0.01, "{id}");
             assert!((rate.cache_read_per_mtok - 1.0).abs() < 0.01, "{id}");
         }
+    }
+
+    #[test]
+    fn fable_5_1_id_beats_the_fable_family_arm() {
+        // Fable 5.1 shares Fable 5's base rates but cache reads cost a
+        // quarter as much; sessions report the full id, so the id arm has
+        // to win over the `fable` substring.
+        for id in [
+            "claude-fable-5-1",
+            "Claude-Fable-5-1",
+            "anthropic.claude-fable-5-1",
+        ] {
+            let rate = rate_for_model(id);
+            assert!((rate.input_per_mtok - 10.0).abs() < 0.01, "{id}");
+            assert!((rate.output_per_mtok - 50.0).abs() < 0.01, "{id}");
+            assert!((rate.cache_creation_per_mtok - 12.5).abs() < 0.01, "{id}");
+            assert!((rate.cache_read_per_mtok - 0.25).abs() < 0.01, "{id}");
+        }
+        let five = rate_for_model("claude-fable-5");
+        assert!((five.cache_read_per_mtok - 1.0).abs() < 0.01);
     }
 
     #[test]

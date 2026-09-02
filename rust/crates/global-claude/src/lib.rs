@@ -12,6 +12,7 @@ mod protocol;
 mod session;
 mod stream;
 mod stream_symptoms;
+mod tool_result_image;
 mod transcript;
 mod transcript_events;
 
@@ -36,12 +37,14 @@ pub use pricing::{fallback_rate, rate_for_model, ModelRate};
 pub use process::spawn_detached;
 pub use session::CcSession;
 pub use stream::{
-    get_last_assistant_text, get_stream_cost, get_stream_file_size, get_stream_result,
-    has_rate_limit_rejection, is_clean_result, last_rate_limit_status, result_outcome,
-    stream_has_broken_session, stream_stale_seconds, write_error_result, write_interrupted_result,
-    RateLimitRejection, StreamCostInfo, StreamRateLimitInfo,
+    get_last_assistant_text, get_stream_cost, get_stream_cost_totals, get_stream_file_size,
+    get_stream_result, has_rate_limit_rejection, is_clean_result, last_rate_limit_status,
+    result_outcome, stream_has_broken_session, stream_stale_seconds, write_error_result,
+    write_interrupted_result, RateLimitRejection, StreamCostInfo, StreamCostTotals,
+    StreamRateLimitInfo,
 };
 pub use stream_symptoms::{CcStreamSymptom, StreamSymptomMatcher, StreamSymptomRule};
+pub use tool_result_image::{load_tool_result_image, ToolResultImage};
 pub use transcript::{
     parse_messages, session_cost, session_cost_or_estimate, tool_usage, ModelUsage, SessionCost,
     ToolUsageSummary, TranscriptMessage,

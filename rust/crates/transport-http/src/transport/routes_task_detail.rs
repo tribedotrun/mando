@@ -161,14 +161,28 @@ pub(crate) async fn get_task_sessions(
             .map_err(|err| {
                 internal_error(err, "failed to parse session status as SessionStatus enum")
             })?;
+            let mut duration_ms = e.duration_ms;
+            let mut cost_usd = e.cost_usd;
+            if e.provider == api_types::TaskProvider::Claude && e.resumed != 0 {
+                if let Some(totals) =
+                    sessions::transcript_access::load_claude_lifetime_totals(&e.session_id)
+                        .filter(|totals| totals.segment_count > 1)
+                {
+                    duration_ms = totals
+                        .duration_ms
+                        .and_then(|duration| i64::try_from(duration).ok())
+                        .or(duration_ms);
+                    cost_usd = totals.cost_usd.or(cost_usd);
+                }
+            }
             Ok(api_types::SessionSummary {
                 session_id: e.session_id,
                 provider: e.provider,
                 status,
                 caller: e.caller,
                 started_at: e.created_at,
-                duration_ms: e.duration_ms,
-                cost_usd: e.cost_usd,
+                duration_ms,
+                cost_usd,
                 model: Some(e.model),
                 resumed: e.resumed != 0,
                 cwd: Some(e.cwd),

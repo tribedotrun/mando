@@ -116,6 +116,27 @@ pub struct SystemThinkingTokensEvent {
     pub meta: EventMeta,
 }
 
+/// Claude Code task/VCS lifecycle notification. Fable 5.1 emits these as
+/// protocol progress around tool calls; they are typed so they do not leak as
+/// unknown JSON rows, but the transcript viewer keeps them out of the chat.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SystemClaudeProgressEvent {
+    pub meta: EventMeta,
+    pub progress_kind: ClaudeProgressKind,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum ClaudeProgressKind {
+    TaskStarted,
+    TaskNotification,
+    BackgroundTasksChanged,
+    TaskUpdated,
+    CodeChangePublished,
+    VcsStateChanged,
+}
+
 /// Codex app-server running token totals. The transcript viewer hides this
 /// progress event from the message flow while using it for the session header.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]

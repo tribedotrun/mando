@@ -8,8 +8,9 @@ interface ThinkingBlockProps {
   label?: string;
 }
 
-export function ThinkingBlock({ text, label }: ThinkingBlockProps): React.ReactElement {
+export function ThinkingBlock({ text, label }: ThinkingBlockProps): React.ReactElement | null {
   const cleaned = cleanThinkingText(text);
+  if (!cleaned) return null;
   return (
     <div
       data-testid="thinking-block"

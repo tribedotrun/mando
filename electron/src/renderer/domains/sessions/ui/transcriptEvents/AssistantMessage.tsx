@@ -7,17 +7,20 @@ import { ThinkingBlock } from '#renderer/domains/sessions/ui/transcriptEvents/Th
 import { PrMarkdown } from '#renderer/global/ui/PrMarkdown';
 
 interface AssistantMessageProps {
+  sessionId: string;
   event: AssistantEvent;
   eventIndex: number;
   toolResults: Map<string, UserToolResultBlock>;
 }
 
 export function AssistantMessage({
+  sessionId,
   event,
   eventIndex,
   toolResults,
-}: AssistantMessageProps): React.ReactElement {
+}: AssistantMessageProps): React.ReactElement | null {
   const items = groupAssistantBlocks(event, eventIndex);
+  if (items.length === 0) return null;
   return (
     <div className="py-2">
       <div className="space-y-1">
@@ -29,6 +32,7 @@ export function AssistantMessage({
                 id={item.group.id}
                 tools={item.group.tools}
                 results={toolResults}
+                sessionId={sessionId}
               />
             );
           }
@@ -68,6 +72,7 @@ export function AssistantMessage({
               key={block.data.id}
               toolUse={block.data}
               result={toolResults.get(block.data.id)}
+              sessionId={sessionId}
             />
           );
         })}

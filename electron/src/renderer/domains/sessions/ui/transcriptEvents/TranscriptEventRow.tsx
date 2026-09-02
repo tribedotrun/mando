@@ -6,17 +6,21 @@ import { SystemMessage } from '#renderer/domains/sessions/ui/transcriptEvents/Sy
 import { UserMessage } from '#renderer/domains/sessions/ui/transcriptEvents/UserMessage';
 
 interface TranscriptEventRowProps {
+  sessionId: string;
   event: TranscriptEvent;
   eventIndex: number;
   initBoundary: boolean;
   toolResults: Map<string, UserToolResultBlock>;
+  isSegmentResult: boolean;
 }
 
 export function TranscriptEventRow({
+  sessionId,
   event,
   eventIndex,
   initBoundary,
   toolResults,
+  isSegmentResult,
 }: TranscriptEventRowProps): React.ReactElement | null {
   if (event.kind === 'system_init') {
     return <SystemMessage event={{ kind: 'init', data: event.data, isBoundary: initBoundary }} />;
@@ -42,6 +46,9 @@ export function TranscriptEventRow({
   if (event.kind === 'system_thinking_tokens') {
     return <SystemMessage event={{ kind: 'thinking_tokens', data: event.data }} />;
   }
+  if (event.kind === 'system_claude_progress') {
+    return null;
+  }
   if (event.kind === 'unknown') {
     return <SystemMessage event={{ kind: 'unknown', data: event.data }} />;
   }
@@ -50,11 +57,16 @@ export function TranscriptEventRow({
   }
   if (event.kind === 'assistant') {
     return (
-      <AssistantMessage event={event.data} eventIndex={eventIndex} toolResults={toolResults} />
+      <AssistantMessage
+        event={event.data}
+        eventIndex={eventIndex}
+        toolResults={toolResults}
+        sessionId={sessionId}
+      />
     );
   }
   if (event.kind === 'result') {
-    return <SessionFooter event={event.data} />;
+    return <SessionFooter event={event.data} isSegment={isSegmentResult} />;
   }
   return null;
 }

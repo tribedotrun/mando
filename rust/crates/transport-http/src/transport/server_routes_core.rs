@@ -176,6 +176,14 @@ fn session_routes() -> ApiRouter<AppState> {
     );
     let router = crate::api_route!(
         router,
+        GET "/api/sessions/{id}/images/{tool}/{index}",
+        transport = Static,
+        auth = Protected,
+        handler = routes_sessions::get_session_tool_result_image,
+        params = api_types::SessionToolResultImageParams
+    );
+    let router = crate::api_route!(
+        router,
         GET "/api/sessions/{id}/events/stream",
         transport = Sse,
         auth = Protected,

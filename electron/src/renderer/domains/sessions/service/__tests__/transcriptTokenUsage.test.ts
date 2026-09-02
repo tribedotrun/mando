@@ -39,6 +39,7 @@ describe('summarizeTranscriptTokenUsage', () => {
         kind: 'assistant',
         data: {
           meta: meta(1),
+          messageId: 'msg-1',
           model: 'claude',
           blocks: [],
           usage: usage(1, 1),
@@ -151,6 +152,7 @@ describe('summarizeTranscriptTokenUsage', () => {
         kind: 'assistant',
         data: {
           meta: meta(1),
+          messageId: 'msg-1',
           model: 'claude',
           blocks: [],
           usage: usage(10, 2, 5),
@@ -161,6 +163,7 @@ describe('summarizeTranscriptTokenUsage', () => {
         kind: 'assistant',
         data: {
           meta: meta(2),
+          messageId: 'msg-2',
           model: 'claude',
           blocks: [],
           usage: usage(3, 4, 0, 1),
@@ -177,6 +180,37 @@ describe('summarizeTranscriptTokenUsage', () => {
       totalTokens: 25,
       source: 'assistant_sum',
     });
+  });
+
+  it('sums resumed Claude result envelopes instead of showing only the last invocation', () => {
+    const result = (line: number, values: TranscriptUsageInfo): TranscriptEvent => ({
+      kind: 'result',
+      data: {
+        meta: meta(line),
+        outcome: 'success',
+        summary: {
+          durationMs: null,
+          durationApiMs: null,
+          numTurns: null,
+          totalCostUsd: null,
+          stopReason: null,
+          permissionDenials: [],
+          errors: [],
+          usage: values,
+          modelUsage: [],
+          isError: false,
+        },
+      },
+    });
+    const summary = summarizeTranscriptTokenUsage(
+      [
+        result(1, usage(12784, 65096, 16849759, 293098)),
+        result(2, usage(190, 610, 569239, 250763)),
+      ],
+      'claude',
+    );
+    assert.equal(summary?.totalTokens, 18_041_539);
+    assert.equal(summary?.source, 'result_sum');
   });
 
   it('formats exact totals and exposes the full token breakdown', () => {

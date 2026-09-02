@@ -194,6 +194,14 @@ pub struct SessionIdParams {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SessionToolResultImageParams {
+    pub id: String,
+    pub tool: String,
+    pub index: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(deny_unknown_fields)]
 pub struct ProjectNameParams {
     pub name: String,
@@ -203,6 +211,12 @@ pub struct ProjectNameParams {
 #[serde(deny_unknown_fields)]
 pub struct ImageFilenameParams {
     pub filename: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GitHubUserAttachmentParams {
+    pub id: String,
 }
 
 /// POST /api/tasks/merge

@@ -95,8 +95,11 @@ pub struct CcConfig {
 impl Default for CcConfig {
     fn default() -> Self {
         Self {
-            model: "fable".into(),
-            effort: Effort::Max,
+            // Pinned id, not the `fable` alias: aliases resolve through the
+            // installed CLI's table, so only a full id fixes the generation
+            // (see captain-workflow.yaml::models).
+            model: "claude-fable-5-1".into(),
+            effort: Effort::High,
             tools: None,
             allowed_tools: None,
             disallowed_tools: None,

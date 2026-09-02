@@ -167,6 +167,14 @@ pub async fn load_session_cost(
     Ok(Some(global_claude::session_cost(&stream)))
 }
 
+/// Lifetime result totals for a Claude JSONL session. Callers must only use
+/// this for rows whose provider is Claude; other providers use different
+/// stream formats and accounting semantics.
+pub fn load_claude_lifetime_totals(session_id: &str) -> Option<global_claude::StreamCostTotals> {
+    let stream = global_infra::paths::stream_path_for_session(session_id);
+    global_claude::get_stream_cost_totals(&stream)
+}
+
 #[tracing::instrument(skip_all)]
 pub async fn load_session_stream(
     pool: &SqlitePool,
@@ -229,6 +237,24 @@ pub async fn load_session_stream(
     }
 
     Ok(Some(filtered))
+}
+
+/// Load one image embedded in a Claude-format tool result without putting its
+/// base64 payload into the typed transcript snapshot.
+#[tracing::instrument(skip_all)]
+pub async fn load_tool_result_image(
+    pool: &SqlitePool,
+    session_id: &str,
+    tool_use_id: &str,
+    image_index: usize,
+) -> anyhow::Result<Option<global_claude::ToolResultImage>> {
+    let Some(source) = transcript_source_for_session(pool, session_id).await? else {
+        return Ok(None);
+    };
+    if !matches!(source.format, TranscriptFormat::ClaudeCode) {
+        return Ok(None);
+    }
+    global_claude::load_tool_result_image(&source.path, tool_use_id, image_index)
 }
 
 async fn stream_path_for_session(session_id: &str) -> anyhow::Result<Option<PathBuf>> {

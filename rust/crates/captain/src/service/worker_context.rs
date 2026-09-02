@@ -11,22 +11,22 @@ pub(crate) fn has_summary_diagram(ctx: &WorkerContext) -> bool {
     ctx.has_work_summary && ctx.work_summary_fresh
 }
 
-/// Which typed-evidence gate a task is failing, and therefore which existing
+/// Which evidence gate a task is failing, and therefore which existing
 /// nudge template answers it.
 ///
-/// The `captain_review` prompt no longer asks the reviewer to check evidence
-/// kinds — it states that typed gates fire deterministically before review.
+/// The `captain_review` prompt does not ask the reviewer to check evidence
+/// shape — it states that these gates fire deterministically before review.
 /// These predicates are that determinism: they run on the classifier's nudge
 /// path so a `gates_pass` review cannot fire on an incomplete deck.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum EvidenceKindGap {
-    /// No kind-tagged capture of the required sort exists at all.
+pub(crate) enum EvidenceGap {
+    /// No capture of the required sort exists at all.
     Missing,
-    /// Kind-tagged captures exist but predate the latest reopen.
+    /// Captures exist but predate the latest reopen.
     Stale,
 }
 
-impl EvidenceKindGap {
+impl EvidenceGap {
     /// The `nudges:` key in `captain-workflow.yaml` that addresses this gap.
     /// Both keys already exist; no new nudge template is introduced.
     pub(crate) fn nudge_key(self) -> &'static str {
@@ -44,43 +44,27 @@ impl EvidenceKindGap {
     }
 }
 
-/// UI work needs all three artifact kinds: a `before` screenshot, an `after`
-/// screenshot, and an `after` recording. Returns `None` once all three are
-/// present and fresh.
+/// UI work needs a fresh screenshot of the end state and a fresh recording of
+/// the action. No "before" capture is required: the diff already shows what
+/// changed, and a baseline of the old behavior never proves the new one
+/// works. Returns `None` once both are present and fresh.
 ///
 /// `evidence_fresh` distinguishes "never captured" from "captured before the
 /// reopen": when the task has evidence that simply went stale, the stale-
 /// evidence nudge is the honest message.
-pub(crate) fn ui_evidence_gap(ctx: &WorkerContext) -> Option<EvidenceKindGap> {
-    let gates = ctx.evidence_kinds;
-    if gates.before_screenshot && gates.after_screenshot && gates.after_recording {
+pub(crate) fn ui_evidence_gap(ctx: &WorkerContext) -> Option<EvidenceGap> {
+    if ctx.has_screenshot && ctx.has_recording {
         return None;
     }
-    Some(gap_kind(ctx))
-}
-
-/// Bug fixes need a `before` and an `after` capture, OR a `cannot-reproduce`
-/// write-up. Returns `None` when either shape is satisfied.
-pub(crate) fn bug_fix_evidence_gap(ctx: &WorkerContext) -> Option<EvidenceKindGap> {
-    let gates = ctx.evidence_kinds;
-    if gates.cannot_reproduce || (gates.before_fix && gates.after_fix) {
-        return None;
-    }
-    Some(gap_kind(ctx))
-}
-
-/// A task that registered evidence which then went stale gets the stale nudge;
-/// anything else gets the missing nudge.
-fn gap_kind(ctx: &WorkerContext) -> EvidenceKindGap {
-    if ctx.has_evidence && !ctx.evidence_fresh {
-        EvidenceKindGap::Stale
+    Some(if ctx.has_evidence && !ctx.evidence_fresh {
+        EvidenceGap::Stale
     } else {
-        EvidenceKindGap::Missing
-    }
+        EvidenceGap::Missing
+    })
 }
 
-/// True when the task's diff touches UI. The kind gates only bind UI work, so
-/// a backend-only change is not held to before/after/recording.
+/// True when the task's diff touches UI. The capture gate only binds UI work,
+/// so a backend-only change is not held to screenshot + recording.
 ///
 /// Conservative on purpose: `changed_files` is empty when the PR fetch
 /// degraded or no PR exists yet, and an empty list must not manufacture a UI
@@ -184,7 +168,6 @@ pub(crate) fn format_context(ctx: &WorkerContext) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::EvidenceKindGates;
 
     fn make_ctx() -> WorkerContext {
         WorkerContext {
@@ -221,7 +204,7 @@ mod tests {
             work_summary_fresh: false,
             has_screenshot: false,
             has_recording: false,
-            evidence_kinds: EvidenceKindGates::default(),
+            has_cannot_reproduce: false,
         }
     }
 
@@ -293,70 +276,52 @@ mod tests {
         assert!(formatted.contains("Item: Test task"));
     }
 
-    // ── Typed evidence-kind gates ──
+    // ── UI capture gate ──
 
-    fn ctx_with_kinds(kinds: EvidenceKindGates) -> WorkerContext {
+    fn ctx_with_captures(screenshot: bool, recording: bool) -> WorkerContext {
         let mut ctx = make_ctx();
         ctx.has_evidence = true;
         ctx.evidence_fresh = true;
-        ctx.evidence_kinds = kinds;
+        ctx.has_screenshot = screenshot;
+        ctx.has_recording = recording;
         ctx
     }
 
-    const FULL_UI_DECK: EvidenceKindGates = EvidenceKindGates {
-        before_screenshot: true,
-        after_screenshot: true,
-        after_recording: true,
-        before_fix: true,
-        after_fix: true,
-        cannot_reproduce: false,
-    };
-
     #[test]
-    fn ui_gap_none_when_all_three_kinds_present() {
-        let ctx = ctx_with_kinds(FULL_UI_DECK);
+    fn ui_gap_none_with_screenshot_and_recording() {
+        let ctx = ctx_with_captures(true, true);
         assert_eq!(ui_evidence_gap(&ctx), None);
     }
 
     #[test]
-    fn ui_gap_flags_each_missing_kind() {
-        for drop_field in ["before_screenshot", "after_screenshot", "after_recording"] {
-            let mut kinds = FULL_UI_DECK;
-            match drop_field {
-                "before_screenshot" => kinds.before_screenshot = false,
-                "after_screenshot" => kinds.after_screenshot = false,
-                _ => kinds.after_recording = false,
-            }
-            let ctx = ctx_with_kinds(kinds);
-            assert_eq!(
-                ui_evidence_gap(&ctx),
-                Some(EvidenceKindGap::Missing),
-                "dropping {drop_field} must open a UI evidence gap"
-            );
-        }
+    fn ui_gap_open_without_recording() {
+        // A png alone proves an end state, not the action; the deck still
+        // owes a recording.
+        let ctx = ctx_with_captures(true, false);
+        assert_eq!(ui_evidence_gap(&ctx), Some(EvidenceGap::Missing));
     }
 
     #[test]
-    fn ui_gap_after_screenshot_alone_does_not_satisfy_recording() {
-        // A `--kind after` png sets after_screenshot but not after_recording;
-        // the deck still owes a recording.
-        let ctx = ctx_with_kinds(EvidenceKindGates {
-            before_screenshot: true,
-            after_screenshot: true,
-            after_recording: false,
-            before_fix: true,
-            after_fix: true,
-            cannot_reproduce: false,
-        });
-        assert_eq!(ui_evidence_gap(&ctx), Some(EvidenceKindGap::Missing));
+    fn ui_gap_open_without_screenshot() {
+        let ctx = ctx_with_captures(false, true);
+        assert_eq!(ui_evidence_gap(&ctx), Some(EvidenceGap::Missing));
+    }
+
+    #[test]
+    fn ui_gap_never_asks_for_a_before_capture() {
+        // Captures carry no kind tag at all and still close the gate: there
+        // is no before/after pairing requirement anywhere in the gate.
+        let mut ctx = ctx_with_captures(true, true);
+        ctx.has_cannot_reproduce = false;
+        assert_eq!(ui_evidence_gap(&ctx), None);
     }
 
     #[test]
     fn gap_reads_stale_when_evidence_predates_reopen() {
-        let mut ctx = ctx_with_kinds(EvidenceKindGates::default());
+        let mut ctx = ctx_with_captures(false, false);
         ctx.has_evidence = true;
         ctx.evidence_fresh = false;
-        assert_eq!(ui_evidence_gap(&ctx), Some(EvidenceKindGap::Stale));
+        assert_eq!(ui_evidence_gap(&ctx), Some(EvidenceGap::Stale));
         assert_eq!(ui_evidence_gap(&ctx).unwrap().nudge_key(), "stale_evidence");
     }
 
@@ -365,47 +330,11 @@ mod tests {
         let mut ctx = make_ctx();
         ctx.has_evidence = false;
         ctx.evidence_fresh = false;
-        assert_eq!(ui_evidence_gap(&ctx), Some(EvidenceKindGap::Missing));
+        assert_eq!(ui_evidence_gap(&ctx), Some(EvidenceGap::Missing));
         assert_eq!(
             ui_evidence_gap(&ctx).unwrap().nudge_key(),
             "missing_evidence"
         );
-    }
-
-    #[test]
-    fn bug_fix_gap_satisfied_by_before_and_after() {
-        let ctx = ctx_with_kinds(EvidenceKindGates {
-            before_fix: true,
-            after_fix: true,
-            ..EvidenceKindGates::default()
-        });
-        assert_eq!(bug_fix_evidence_gap(&ctx), None);
-    }
-
-    #[test]
-    fn bug_fix_gap_satisfied_by_cannot_reproduce_alone() {
-        let ctx = ctx_with_kinds(EvidenceKindGates {
-            cannot_reproduce: true,
-            ..EvidenceKindGates::default()
-        });
-        assert_eq!(bug_fix_evidence_gap(&ctx), None);
-    }
-
-    #[test]
-    fn bug_fix_gap_open_with_only_one_side() {
-        for kinds in [
-            EvidenceKindGates {
-                before_fix: true,
-                ..EvidenceKindGates::default()
-            },
-            EvidenceKindGates {
-                after_fix: true,
-                ..EvidenceKindGates::default()
-            },
-        ] {
-            let ctx = ctx_with_kinds(kinds);
-            assert_eq!(bug_fix_evidence_gap(&ctx), Some(EvidenceKindGap::Missing));
-        }
     }
 
     #[test]

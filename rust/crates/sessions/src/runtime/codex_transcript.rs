@@ -204,6 +204,7 @@ fn assistant_text(
     };
     state.record_agent_delta(string_at(value, &["/params/itemId", "/params/item/id"]).as_deref());
     TranscriptEvent::Assistant(AssistantEvent {
+        message_id: None,
         model: string_at(value, &["/params/model", "/params/item/model"]).or_else(|| state.model()),
         blocks: vec![AssistantContentBlock::Text(AssistantTextBlock { text })],
         usage: None,
@@ -238,6 +239,7 @@ fn assistant_thinking(
         string_at(value, &["/params/itemId", "/params/item/id"]).as_deref(),
     );
     TranscriptEvent::Assistant(AssistantEvent {
+        message_id: None,
         model: string_at(value, &["/params/model", "/params/item/model"]),
         blocks: vec![AssistantContentBlock::Thinking(AssistantThinkingBlock {
             text,

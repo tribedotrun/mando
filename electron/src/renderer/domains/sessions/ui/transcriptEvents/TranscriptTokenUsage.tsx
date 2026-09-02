@@ -4,18 +4,20 @@ import {
   formatUsageBreakdown,
   summarizeTranscriptTokenUsage,
 } from '#renderer/domains/sessions/service/transcriptTokenUsage';
-import type { TranscriptEvent } from '#renderer/global/types';
+import type { TaskProvider, TranscriptEvent } from '#renderer/global/types';
 
 interface TranscriptTokenUsageProps {
   events: readonly TranscriptEvent[] | undefined;
   isLoading: boolean;
+  provider?: TaskProvider;
 }
 
 export function TranscriptTokenUsage({
   events,
   isLoading,
+  provider,
 }: TranscriptTokenUsageProps): React.ReactElement {
-  const usage = events ? summarizeTranscriptTokenUsage(events) : null;
+  const usage = events ? summarizeTranscriptTokenUsage(events, provider) : null;
   const value = isLoading ? '…' : usage ? formatExactTokenCount(usage.totalTokens) : '—';
   const title = usage ? formatUsageBreakdown(usage) : 'Token usage unavailable for this session';
 

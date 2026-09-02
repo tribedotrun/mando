@@ -13,9 +13,9 @@ pub(crate) struct ArtifactGates {
     pub has_screenshot: bool,
     /// At least one recording (gif/mp4/mov/webm) in evidence artifacts.
     pub has_recording: bool,
-    /// Kind-tagged gates (`--kind before` / `after` / `cannot-reproduce`)
-    /// intersected with media type. Same freshness window as `has_screenshot`.
-    pub evidence_kinds: crate::EvidenceKindGates,
+    /// A `--kind cannot-reproduce` write-up among fresh evidence. Same
+    /// freshness window as `has_screenshot`.
+    pub has_cannot_reproduce: bool,
 }
 
 /// Query task_artifacts to compute artifact gates for a single task.
@@ -60,7 +60,7 @@ pub(crate) async fn compute_artifact_gates(
             .any(|a| a.created_at.as_str() > threshold)
     };
 
-    // Typed evidence gates use only fresh artifacts (same threshold as evidence_fresh).
+    // Capture gates use only fresh artifacts (same threshold as evidence_fresh).
     let fresh_evidence: Vec<_> = if reopen_seq == 0 || reopened_at.is_none() {
         evidence_artifacts.clone()
     } else {
@@ -82,27 +82,10 @@ pub(crate) async fn compute_artifact_gates(
             .any(|m| RECORDING_EXTS.contains(&m.ext.to_lowercase().as_str()))
     });
 
-    let mut evidence_kinds = crate::EvidenceKindGates::default();
-    for media in fresh_evidence.iter().flat_map(|a| a.media.iter()) {
-        let ext = media.ext.to_lowercase();
-        let is_screenshot = SCREENSHOT_EXTS.contains(&ext.as_str());
-        let is_recording = RECORDING_EXTS.contains(&ext.as_str());
-        match media.kind {
-            Some(crate::EvidenceKind::BeforeFix) => {
-                evidence_kinds.before_fix = true;
-                evidence_kinds.before_screenshot |= is_screenshot;
-            }
-            Some(crate::EvidenceKind::AfterFix) => {
-                evidence_kinds.after_fix = true;
-                evidence_kinds.after_screenshot |= is_screenshot;
-                evidence_kinds.after_recording |= is_recording;
-            }
-            Some(crate::EvidenceKind::CannotReproduce) => {
-                evidence_kinds.cannot_reproduce = true;
-            }
-            Some(crate::EvidenceKind::Other) | None => {}
-        }
-    }
+    let has_cannot_reproduce = fresh_evidence
+        .iter()
+        .flat_map(|a| a.media.iter())
+        .any(|m| m.kind == Some(crate::EvidenceKind::CannotReproduce));
 
     ArtifactGates {
         has_evidence,
@@ -111,6 +94,6 @@ pub(crate) async fn compute_artifact_gates(
         work_summary_fresh,
         has_screenshot,
         has_recording,
-        evidence_kinds,
+        has_cannot_reproduce,
     }
 }

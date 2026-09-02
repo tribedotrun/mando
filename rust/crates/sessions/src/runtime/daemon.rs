@@ -45,6 +45,9 @@ type StreamFn = dyn Fn(String, Option<Vec<String>>) -> SessionFuture<Option<Stri
 type EventsSnapshotFn = dyn Fn(String) -> SessionFuture<Option<crate::runtime::transcript_access::EventsSnapshot>>
     + Send
     + Sync;
+type ToolResultImageFn = dyn Fn(String, String, usize) -> SessionFuture<Option<global_claude::ToolResultImage>>
+    + Send
+    + Sync;
 
 #[derive(Debug, Clone)]
 pub struct SessionStartRequest {
@@ -117,6 +120,7 @@ pub struct SessionsRuntimeOps {
     pub session_cost: Arc<SessionCostFn>,
     pub session_stream: Arc<StreamFn>,
     pub events_snapshot: Arc<EventsSnapshotFn>,
+    pub tool_result_image: Arc<ToolResultImageFn>,
 }
 
 #[derive(Clone)]
@@ -138,6 +142,7 @@ pub struct SessionsRuntime {
     session_cost: Arc<SessionCostFn>,
     session_stream: Arc<StreamFn>,
     events_snapshot: Arc<EventsSnapshotFn>,
+    tool_result_image: Arc<ToolResultImageFn>,
 }
 
 impl SessionsRuntime {
@@ -160,6 +165,7 @@ impl SessionsRuntime {
             session_cost: ops.session_cost,
             session_stream: ops.session_stream,
             events_snapshot: ops.events_snapshot,
+            tool_result_image: ops.tool_result_image,
         }
     }
 
@@ -282,6 +288,16 @@ impl SessionsRuntime {
     ) -> anyhow::Result<Option<crate::runtime::transcript_access::EventsSnapshot>> {
         (self.events_snapshot)(session_id.to_string()).await
     }
+
+    #[tracing::instrument(skip_all)]
+    pub async fn tool_result_image(
+        &self,
+        session_id: &str,
+        tool_use_id: &str,
+        image_index: usize,
+    ) -> anyhow::Result<Option<global_claude::ToolResultImage>> {
+        (self.tool_result_image)(session_id.to_string(), tool_use_id.to_string(), image_index).await
+    }
 }
 
 #[cfg(test)]
@@ -359,6 +375,7 @@ mod tests {
             session_cost: Arc::new(|_| Box::pin(async { Ok(None) })),
             session_stream: Arc::new(|_, _| Box::pin(async { Ok(None) })),
             events_snapshot: Arc::new(|_| Box::pin(async { Ok(None) })),
+            tool_result_image: Arc::new(|_, _, _| Box::pin(async { Ok(None) })),
         })
     }
 

@@ -68,6 +68,11 @@ export type AssistantContentBlock =
   | { kind: 'advisor_tool_result'; data: AdvisorToolResultBlock };
 export type AssistantEvent = {
   meta: EventMeta;
+  /**
+   * Provider message id. Claude emits one JSONL envelope per content block,
+   * all sharing this id; the renderer uses it to rebuild the API message.
+   */
+  messageId: string | null;
   model: string | null;
   blocks: Array<AssistantContentBlock>;
   usage: TranscriptUsageInfo | null;
@@ -142,6 +147,13 @@ export type ClarifyResponse = {
   error: string | null;
 };
 export type ClassifyRule = { category: string; patterns: Array<string> };
+export type ClaudeProgressKind =
+  | 'task_started'
+  | 'task_notification'
+  | 'background_tasks_changed'
+  | 'task_updated'
+  | 'code_change_published'
+  | 'vcs_state_changed';
 export type ClientLogBatchRequest = { entries: Array<ClientLogEntry> };
 export type ClientLogBatchResponse = { accepted: number };
 export type ClientLogContext = {
@@ -351,8 +363,8 @@ export type EvidenceFileRequest = {
   ext: string;
   caption: string;
   /**
-   * Optional typed role. When the task is classified `is_bug_fix`, captain
-   * requires at least one `BeforeFix` and one `AfterFix` artifact.
+   * Optional typed role. Only `CannotReproduce` changes captain routing;
+   * captures are normally registered without a kind.
    */
   kind: EvidenceKind | null;
 };
@@ -377,6 +389,7 @@ export type FileChangeKind = 'add' | 'update' | 'delete' | 'move' | 'other';
 export type FirecrawlScrapeRequest = { url: string };
 export type FirecrawlScrapeResponse = { ok: boolean; content: string };
 export type GatewayConfig = { dashboard: DashboardConfig };
+export type GitHubUserAttachmentParams = { id: string };
 export type GlobInput = { pattern: string; path: string | null };
 export type GrepInput = {
   pattern: string;
@@ -780,6 +793,7 @@ export type SessionSummary = {
   cwd: string | null;
   worker_name: string | null;
 };
+export type SessionToolResultImageParams = { id: string; tool: string; index: number };
 export type SessionToolUsageResponse = { tools: Array<SessionToolUsageSummary> };
 export type SessionToolUsageSummary = { name: string; call_count: number; error_count: number };
 export type SessionsEventData = { affected_task_ids: Array<number> | null };
@@ -853,6 +867,7 @@ export type SystemApiRetryEvent = {
   retryInMs: number | null;
   attempt: number | null;
 };
+export type SystemClaudeProgressEvent = { meta: EventMeta; progressKind: ClaudeProgressKind };
 export type SystemCompactBoundaryEvent = { meta: EventMeta; reason: string | null };
 export type SystemHealthResponse = {
   healthy: boolean;
@@ -1313,6 +1328,7 @@ export type TranscriptEvent =
   | { kind: 'system_hook'; data: SystemHookEvent }
   | { kind: 'system_rate_limit'; data: SystemRateLimitEvent }
   | { kind: 'system_thinking_tokens'; data: SystemThinkingTokensEvent }
+  | { kind: 'system_claude_progress'; data: SystemClaudeProgressEvent }
   | { kind: 'system_token_usage'; data: SystemTokenUsageEvent }
   | { kind: 'user'; data: UserEvent }
   | { kind: 'assistant'; data: AssistantEvent }

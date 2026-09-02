@@ -19,11 +19,16 @@ import { WebSearchBlock } from '#renderer/domains/sessions/ui/transcriptEvents/t
 import { WriteBlock } from '#renderer/domains/sessions/ui/transcriptEvents/tools/WriteBlock';
 
 interface ToolCallBlockProps {
+  sessionId: string;
   toolUse: AssistantToolUseBlock;
   result?: UserToolResultBlock;
 }
 
-export function ToolCallBlock({ toolUse, result }: ToolCallBlockProps): React.ReactElement | null {
+export function ToolCallBlock({
+  toolUse,
+  result,
+  sessionId,
+}: ToolCallBlockProps): React.ReactElement | null {
   const { id, name, input } = toolUse;
   const isError = result?.isError === true;
 
@@ -31,7 +36,15 @@ export function ToolCallBlock({ toolUse, result }: ToolCallBlockProps): React.Re
     return <BashBlock id={id} input={input.data} result={result} isError={isError} />;
   }
   if (name.kind === 'read' && input.kind === 'read') {
-    return <ReadBlock id={id} input={input.data} result={result} isError={isError} />;
+    return (
+      <ReadBlock
+        id={id}
+        input={input.data}
+        result={result}
+        isError={isError}
+        sessionId={sessionId}
+      />
+    );
   }
   if (name.kind === 'edit' && input.kind === 'edit') {
     return <EditDiffBlock id={id} input={input.data} result={result} isError={isError} />;

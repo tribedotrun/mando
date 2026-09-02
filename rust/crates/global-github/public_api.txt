@@ -1,5 +1,7 @@
 pub use review_threads::get_pr_review_threads;
 pub use types::{ MergeBlockReason, MergeOutcome, MergeableStatus, PrComment, PrState, PrStatus, ReviewDecision, ReviewThread, ThreadComment, };
+pub struct GitHubUserAttachment
+pub fn get_user_attachment
 pub fn fetch_pr_status
 pub fn is_pr_merged
 pub fn is_pr_branch_ahead

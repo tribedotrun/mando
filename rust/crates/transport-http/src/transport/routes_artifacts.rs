@@ -163,6 +163,33 @@ pub(crate) async fn get_artifact_media(
     }
 }
 
+// ── GET /api/github/attachments/{id} ─────────────────────────────
+
+/// Proxy private-repository PR media through the authenticated GitHub CLI.
+/// The route accepts only a UUID-shaped asset id, never an arbitrary URL.
+pub(crate) async fn get_github_user_attachment(
+    Path(api_types::GitHubUserAttachmentParams { id }): Path<api_types::GitHubUserAttachmentParams>,
+) -> Result<axum::response::Response<Body>, ApiError> {
+    let attachment = global_github::get_user_attachment(&id)
+        .await
+        .map_err(|e| internal_error(e, "failed to fetch GitHub user attachment"))?;
+    let content_length = attachment.bytes.len();
+
+    match axum::response::Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, attachment.content_type)
+        .header(header::CONTENT_LENGTH, content_length)
+        .header(header::CACHE_CONTROL, "private, max-age=3600")
+        .body(Body::from(attachment.bytes))
+    {
+        Ok(response) => Ok(response),
+        Err(e) => Err(error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            &format!("failed to build GitHub attachment response: {e}"),
+        )),
+    }
+}
+
 // ── PUT /api/artifacts/{id}/media ───────────────────────────────────
 
 /// Backfill `remote_url` on existing media entries after GCS upload.

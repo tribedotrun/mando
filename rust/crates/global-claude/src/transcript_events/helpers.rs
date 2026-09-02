@@ -26,17 +26,26 @@ pub(super) fn parse_permission_mode(s: &str) -> Option<CcPermissionMode> {
 
 pub(super) fn parse_usage(u: &serde_json::Value) -> TranscriptUsageInfo {
     TranscriptUsageInfo {
-        input_tokens: u.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
-        output_tokens: u.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
+        input_tokens: token_field(u, "input_tokens", "inputTokens"),
+        output_tokens: token_field(u, "output_tokens", "outputTokens"),
         cache_read_tokens: u
             .get("cache_read_input_tokens")
+            .or_else(|| u.get("cacheReadInputTokens"))
             .and_then(|v| v.as_u64())
             .unwrap_or(0),
         cache_creation_tokens: u
             .get("cache_creation_input_tokens")
+            .or_else(|| u.get("cacheCreationInputTokens"))
             .and_then(|v| v.as_u64())
             .unwrap_or(0),
     }
+}
+
+fn token_field(u: &serde_json::Value, snake: &str, camel: &str) -> u64 {
+    u.get(snake)
+        .or_else(|| u.get(camel))
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0)
 }
 
 pub(super) fn str_field(input: &serde_json::Value, key: &str) -> String {

@@ -205,9 +205,10 @@ export function extractToolResultText(result: UserToolResultBlock): string {
   return result.content.data.blocks
     .map((b) => {
       if (b.kind === 'text') return b.data.text;
-      if (b.kind === 'image') return '[image]';
+      if (b.kind === 'image') return '';
       return b.data.raw;
     })
+    .filter(Boolean)
     .join('\n');
 }
 

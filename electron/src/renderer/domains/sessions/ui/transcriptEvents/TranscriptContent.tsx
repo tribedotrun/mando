@@ -1,7 +1,7 @@
 import React from 'react';
 import { isTranscriptUnavailable } from '#renderer/domains/sessions/service/helpers';
 import { TranscriptMessageList } from '#renderer/domains/sessions/ui/transcriptEvents/TranscriptMessageList';
-import type { TranscriptEventsResponse } from '#renderer/global/types';
+import type { TaskProvider, TranscriptEventsResponse } from '#renderer/global/types';
 import { ErrorBoundary } from '#renderer/global/ui/ErrorBoundary';
 import { Skeleton } from '#renderer/global/ui/primitives/skeleton';
 
@@ -9,12 +9,14 @@ interface TranscriptContentProps {
   data: TranscriptEventsResponse | undefined;
   isLoading: boolean;
   error: Error | null;
+  provider?: TaskProvider;
 }
 
 export function TranscriptContent({
   data,
   isLoading,
   error,
+  provider,
 }: TranscriptContentProps): React.ReactElement {
   return (
     <ErrorBoundary fallbackLabel="Transcript">
@@ -43,7 +45,12 @@ export function TranscriptContent({
           </div>
         )
       ) : data?.events && data.events.length > 0 ? (
-        <TranscriptMessageList events={data.events} isRunning={data.isRunning} />
+        <TranscriptMessageList
+          sessionId={data.sessionId}
+          events={data.events}
+          isRunning={data.isRunning}
+          provider={provider}
+        />
       ) : (
         <div className="py-8 text-center text-body text-muted-foreground">
           No transcript available

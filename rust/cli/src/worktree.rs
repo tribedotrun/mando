@@ -84,9 +84,9 @@ async fn handle_open(name: Option<String>, project: Option<String>) -> anyhow::R
 
         eprintln!("Launching claude...");
         let mut cmd = std::process::Command::new("claude");
+        // No `--effort`: the interactive session keeps the user's own Claude
+        // Code default instead of a Mando-imposed level.
         cmd.arg("--dangerously-skip-permissions")
-            .arg("--effort")
-            .arg("max")
             .current_dir(wt_path);
         if let Some(pick) = credential {
             eprintln!("mando: using credential '{}' (#{})", pick.label, pick.id);

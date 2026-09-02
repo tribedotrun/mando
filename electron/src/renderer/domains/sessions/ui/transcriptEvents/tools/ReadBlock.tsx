@@ -5,16 +5,23 @@ import { ToolResultBody } from '#renderer/domains/sessions/ui/transcriptEvents/T
 import { buildReadSummary } from '#renderer/domains/sessions/service/transcriptRenderHelpers';
 
 interface ReadBlockProps {
+  sessionId: string;
   id: string;
   input: ReadInput;
   result?: UserToolResultBlock;
   isError?: boolean;
 }
 
-export function ReadBlock({ id, input, result, isError }: ReadBlockProps): React.ReactElement {
+export function ReadBlock({
+  id,
+  input,
+  result,
+  isError,
+  sessionId,
+}: ReadBlockProps): React.ReactElement {
   return (
     <ToolFrame id={id} name="Read" summary={buildReadSummary(input)} isError={isError}>
-      <ToolResultBody result={result} />
+      <ToolResultBody result={result} sessionId={sessionId} toolUseId={id} />
     </ToolFrame>
   );
 }

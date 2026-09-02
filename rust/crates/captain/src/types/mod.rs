@@ -18,7 +18,7 @@ pub use artifact::{
     ArtifactMedia, ArtifactType, EvidenceArtifactCreated, EvidenceFileSpec, EvidenceKind,
     TaskArtifact, UpdateArtifactMediaOutcome,
 };
-pub use captain::{Action, ActionKind, EvidenceKindGates, TickMode, TickResult, WorkerContext};
+pub use captain::{Action, ActionKind, TickMode, TickResult, WorkerContext};
 pub use effect_request::EffectRequest;
 pub use git_error::{find_git_error, GitError};
 pub use pid::Pid;

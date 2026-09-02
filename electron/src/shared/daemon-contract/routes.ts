@@ -292,6 +292,13 @@ export interface Routes {
     body: Types.FirecrawlScrapeRequest;
     res: Types.FirecrawlScrapeResponse;
   };
+  getGithubAttachmentsById: {
+    method: 'GET';
+    path: '/api/github/attachments/{id}';
+    transport: 'static';
+    auth: 'protected';
+    params: Types.GitHubUserAttachmentParams;
+  };
   getHealth: {
     method: 'GET';
     path: '/api/health';
@@ -537,6 +544,13 @@ export interface Routes {
     auth: 'protected';
     params: Types.SessionIdParams;
     event: Types.TranscriptEventEnvelope;
+  };
+  getSessionsByIdImagesByToolByIndex: {
+    method: 'GET';
+    path: '/api/sessions/{id}/images/{tool}/{index}';
+    transport: 'static';
+    auth: 'protected';
+    params: Types.SessionToolResultImageParams;
   };
   getSessionsByIdJsonlpath: {
     method: 'GET';
@@ -1146,6 +1160,12 @@ export const routes = {
     transport: 'json',
     auth: 'protected',
   },
+  getGithubAttachmentsById: {
+    method: 'GET',
+    path: '/api/github/attachments/{id}',
+    transport: 'static',
+    auth: 'protected',
+  },
   getHealth: { method: 'GET', path: '/api/health', transport: 'json', auth: 'public' },
   getHealthSystem: {
     method: 'GET',
@@ -1295,6 +1315,12 @@ export const routes = {
     method: 'GET',
     path: '/api/sessions/{id}/events/stream',
     transport: 'sse',
+    auth: 'protected',
+  },
+  getSessionsByIdImagesByToolByIndex: {
+    method: 'GET',
+    path: '/api/sessions/{id}/images/{tool}/{index}',
+    transport: 'static',
     auth: 'protected',
   },
   getSessionsByIdJsonlpath: {

@@ -121,6 +121,10 @@ pub(super) fn parse_assistant(val: &serde_json::Value, meta: EventMeta) -> Assis
         .map(String::from);
     AssistantEvent {
         meta,
+        message_id: val
+            .pointer("/message/id")
+            .and_then(|v| v.as_str())
+            .map(String::from),
         model,
         blocks,
         usage,

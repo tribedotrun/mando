@@ -9,6 +9,7 @@ api-types = { path = "../api-types" }
 captain = { path = "../captain" }
 global-bus = { path = "../global-bus" }
 global-claude = { path = "../global-claude" }
+global-github = { path = "../global-github" }
 global-types = { path = "../global-types" }
 global-infra = { path = "../global-infra" }
 scout = { path = "../scout" }

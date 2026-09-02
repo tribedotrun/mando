@@ -35,6 +35,7 @@ pub fn events_to_markdown(events: &[TranscriptEvent]) -> String {
             | TranscriptEvent::SystemHook(_)
             | TranscriptEvent::SystemRateLimit(_)
             | TranscriptEvent::SystemThinkingTokens(_)
+            | TranscriptEvent::SystemClaudeProgress(_)
             | TranscriptEvent::SystemTokenUsage(_)
             | TranscriptEvent::ToolProgress(_)
             | TranscriptEvent::Unknown(_) => {}
@@ -404,6 +405,7 @@ mod tests {
             }),
             TranscriptEvent::Assistant(AssistantEvent {
                 meta: meta(),
+                message_id: None,
                 model: Some("claude-haiku".into()),
                 blocks: vec![AssistantContentBlock::Text(AssistantTextBlock {
                     text: "hi".into(),
@@ -423,6 +425,7 @@ mod tests {
     fn renders_bash_tool_use() {
         let events = vec![TranscriptEvent::Assistant(AssistantEvent {
             meta: meta(),
+            message_id: None,
             model: None,
             blocks: vec![AssistantContentBlock::ToolUse(AssistantToolUseBlock {
                 id: "tu".into(),
