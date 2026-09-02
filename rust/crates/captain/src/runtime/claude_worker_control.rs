@@ -46,6 +46,24 @@ pub(super) async fn resume_worker(
         }
     }
 
+    // Claude appends a fresh init/result pair for every `--resume` invocation,
+    // and each result contains only that invocation's metrics. Persist the
+    // completed segment before marking the same DB row running again so the
+    // existing additive session accounting retains its duration and cost.
+    let stream_path = global_infra::paths::stream_path_for_session(session_id);
+    if global_claude::get_stream_cost(&stream_path).is_some() {
+        crate::io::headless_cc::log_session_completion(
+            pool,
+            session_id,
+            &cwd.display().to_string(),
+            "worker",
+            worker_name,
+            Some(item.id),
+            global_types::SessionStatus::Stopped,
+        )
+        .await?;
+    }
+
     let (mut env, credential_id) =
         super::spawner::credential_env_for_session(pool, session_id).await;
     env.insert("MANDO_TASK_ID".to_string(), item.id.to_string());

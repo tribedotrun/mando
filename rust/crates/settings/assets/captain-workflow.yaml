@@ -7,10 +7,15 @@
 # Prompt templates use Jinja2 syntax: {{ variable }}, {% if %}, etc.
 # ─────────────────────────────────────────────────────────────────────────────
 
+# Full model ids, not CLI aliases. `fable` / `opus` resolve through the
+# installed Claude Code's alias table (2.1.257: fable -> claude-fable-5-1,
+# opus -> claude-opus-5; builds before 2.1.257 map fable -> claude-fable-5),
+# so only a pinned id guarantees which generation runs and which rate
+# `global_claude::pricing` applies.
 models:
-  worker: "opus"
-  captain: "fable"
-  clarifier: "fable"
+  worker: "claude-fable-5-1"
+  captain: "claude-fable-5-1"
+  clarifier: "claude-fable-5-1"
 
 # Tasks that opt into GLM route implementation work to OpenCode. Other phases
 # continue to use the task's provider and have no stage-routing configuration.
@@ -66,9 +71,10 @@ agent:
   # Thinking effort sent as `--effort` on captain's own Claude Code spawns:
   # workers, clarifiers, review and merge sessions. Scout and ops spawns do
   # not read this key — they take `CcConfig`'s built-in default, which is the
-  # same "max", so changing this here moves captain only.
-  # Scale: low | medium | high | xhigh | max.
-  cc_effort: "max"
+  # same "high", so changing this here moves captain only.
+  # Scale: low | medium | high | xhigh | max. Fable 5.1's recommended start
+  # is "high"; raise per workload only where evals show a gain.
+  cc_effort: "high"
   no_pr_min_active_s: 180
 
 # Applied on top of the values above only when the daemon is launched with
@@ -169,11 +175,13 @@ prompts:
 
     Run the product where you can see it. For mobile work, boot the worktree-owned device with a visible window — your choice of iOS simulator or Android emulator unless the task names one — and drive it through the repo's mobile-automation skill when it has one. Desktop and Electron apps run visible the same way. Never leave a device running without a visible control window, and never tear down devices other sessions own.
 
-    Capture the real thing: for UI changes, the before state first, then the after state and a recording of the action itself — the recorder must be rolling while the change happens, since static recordings are rejected (motion floor 0.1% changed pixels; `--allow-static` only when "nothing happens" is itself the proof). Net-new UI still gets a before capture of where the feature now lives. If code changes after you captured, recapture. Non-UI proof is the relevant command's output saved to a file.
+    Capture the change working: for UI changes, a screenshot of the end state and a recording of the action itself — the recorder must be rolling while the change happens, since static recordings are rejected (motion floor 0.1% changed pixels; `--allow-static` only when "nothing happens" is itself the proof). No "before" capture is required, for net-new UI or for anything else: the diff already shows what changed, and a baseline of the old behavior is never worth a second stack or a throwaway worktree. Non-UI proof is the relevant command's output saved to a file.
+
+    Capture only once the code is final — if code changes after you captured, you recapture, so early captures are waste. Then run the independent proof lanes in parallel rather than one after another: mobile proof, web proof, and the deck prose are separate lanes once the code lands, so fan them out as concurrent subagents, each owning its own device, files, and captions. The one ordering constraint is code before capture.
 
     Register the files (Mando-specific CLI — this exact shape):
-    `mando todo evidence before.png after.png demo.webm --caption "before: ..." --caption "after: ..." --caption "after: ..." --kind before --kind after --kind after`
-    One `--caption` and one `--kind` per file, positional. Kinds: `before` / `after` (and `cannot-reproduce` for bug fixes).
+    `mando todo evidence after.png demo.webm --caption "..." --caption "..."`
+    One `--caption` per file, positional. No `--kind` tag is needed on captures.
 
     Build the deck with the `tool-html-deck` skill; if this repo does not have it, read `~/Desktop/Aburra/AburraCode/hyper-tribe/.claude/skills/tool-html-deck/SKILL.md` and use its template and build.py from there. Put the deck at `.ai/evidence/deck.html` in the worktree with the media files beside it (relative `src`). The deck tells the review story: what was asked, what changed, and the captures proving it works end-to-end — embed the screenshots, reference recordings by filename with a representative frame. This deck is the only thing the human looks at to judge the quality of your work — write it accordingly. Before finishing, open your own captures; if they do not clearly show the change working, fix and recapture.
 
@@ -182,11 +190,9 @@ prompts:
 
     ## Bug Fix Protocol
 
-    A bug fix needs proof the bug existed and proof it is gone, captured under the same scenario so they compare side by side.
+    Reproduce the bug before changing code. A fix without a reproducer is a guess. If you cannot reproduce it after a real attempt, write up exactly what you tried and the observed behavior, register that file with `--kind cannot-reproduce`, and stop — captain routes it to the human; do not guess at a fix without a reproducer.
 
-    Reproduce the bug before changing code. If you cannot reproduce it after a real attempt, write up exactly what you tried and the observed behavior, register that file with `--kind cannot-reproduce`, and stop — captain routes it to the human; do not guess at a fix without a reproducer.
-
-    Once it reproduces: capture the broken behavior (`--kind before`), implement the fix, re-run the same scenario, and capture the fixed behavior (`--kind after`). Captain pairs before/after from the typed kinds, not caption text, and will not ship a bug fix missing either side. Both captures go in the deck.
+    Once it reproduces: implement the fix, re-run the same scenario, and capture the fixed behavior for the deck. The reproduction is for you; the deck proves the fix. No registered "before" capture is required — if one fell out of your reproduction it can go in the deck for context, but never spend extra work producing one.
     {% endif %}
 
   _out_of_scope_discoveries: |
@@ -367,11 +373,17 @@ prompts:
     {{ evidence_images }}
     {% endif %}
 
+    ## Complete Findings, One Pass
+
+    Sweep everything before you write a verdict: the full diff, every evidence file, every requirement in the task and brief. Then put every finding in this one verdict, ordered by severity, each naming the file and line (or the artifact), what you observed, and what correct looks like. The worker fixes exactly what you list and nothing else, so a verdict that names one gap and calls the rest fine is a failed review: whatever you left out costs another full round.
+
+    Findings are observed, not invented. Every finding cites something you read or opened. No "consider adding", no speculative hardening, no defensive work against hypotheticals — if the task does not require it and nothing you inspected is wrong, it is not a finding.
+
     ## Verdicts
 
     The enforced schema limits which of these this trigger allows.
     - **ship** — the work is done and the evidence proves it. Requires confidence below.
-    - **nudge** — something specific is missing or wrong; the worker session resumes with your feedback, so make it exact: errors, files, the precise gap in the evidence.
+    - **nudge** — something specific is missing or wrong; the worker session resumes with your feedback, so make it exact: the complete findings list, with errors, files, and the precise gap in the evidence.
     - **respawn** — the session is broken or looping; start fresh in a new worktree. A respawn also gets a fresh credential from the load-balanced pool, so rate-limit or auth starvation clears here — prefer respawn over escalate for those.
     - **reset_budget** — the intervention budget burned on false alarms; resets it to zero and nudges.
     - **retry_clarifier** — clarification-stage failures only: the task is understandable and clarification deserves another attempt.
@@ -387,12 +399,12 @@ prompts:
     No-PR task: no diff, no merge. The workpad (`{{ workpad_path }}`) plus the transcript are the whole deliverable — ship when they show the stated work was done; screenshots are not required.
     {% endif %}
     {% if is_bug_fix %}
-    Bug fix: the `before` capture must actually show the broken behavior and the `after` the same scenario fixed — a generic screenshot wearing the tag does not count. If the worker registered a `cannot-reproduce` write-up, escalate with it; before/after does not apply then.
+    Bug fix: the capture must show the reported scenario itself fixed — a generic success screen does not count. No `before` capture is required and its absence is never a finding. If the worker registered a `cannot-reproduce` write-up, escalate with it.
     {% endif %}
     {% if is_ci_failure %}
     CI failure: run `gh pr checks`, read the logs, and nudge with exact errors, files, and lines — never "CI is failing". Escalate only for infrastructure failures (flaky runners, CI config, rate limits).
     {% endif %}
-    Typed evidence gates (kinds, freshness, motion) are enforced deterministically before this review — missing-gate nudges have already fired. Spend your judgment on what the captures show, not on checklists.
+    Evidence gates (presence, freshness, screenshot + recording for UI work, motion) are enforced deterministically before this review — missing-gate nudges have already fired. Spend your judgment on what the captures show, not on checklists.
 
     ## Output
 
@@ -407,7 +419,7 @@ prompts:
     Complete the rebase in this session. Do not create a new PR; rebase and force-push the existing branch.
 
   reopen_resume: |
-    Captain reopened you with review feedback (reopen #{{ reopen_seq }}). Read `.ai/captain-reopen-context.md`, address the feedback, and post an ack comment. If code changes, recapture the affected evidence and refresh the deck.
+    Captain reopened you with review feedback (reopen #{{ reopen_seq }}). Read `.ai/captain-reopen-context.md`, address the feedback, and post an ack comment. A fix round is scoped to the listed findings: no new features, refactors, or defensive additions — note new scope in the workpad instead. If code changes, recapture the affected evidence and refresh the deck.
 
   # Written to `.ai/captain-reopen-context.md` in the worktree, which
   # `reopen_resume` and the `reopen_ack` nudge both point the worker at.
@@ -419,7 +431,7 @@ prompts:
 
     Address the feedback, then post an ack comment: `[Mando] Reopen #{{ reopen_seq }} addressed: <summary>`
 
-    If you make code changes, recapture the affected evidence and refresh the deck.
+    This round is scoped to the findings above: no new features, refactors, or defensive additions. Anything else you spot goes in the workpad as an out-of-scope note. If you make code changes, recapture the affected evidence and refresh the deck.
     {% if images %}
 
     ## Attached Images
@@ -436,10 +448,10 @@ prompts:
     PR is still draft. Run `/x-pr` to mark it ready for review before returning to human review.
 
   mergeability_issue_missing_evidence: |
-    Your task has no registered evidence. Capture live proof the change works and register it with `mando todo evidence <file> --caption "..." --kind <before|after>`, then build the deck at `.ai/evidence/deck.html`.
+    Your task has no registered evidence. Capture live proof the change works and register it with `mando todo evidence <file> --caption "..."`, then build the deck at `.ai/evidence/deck.html`.
 
   mergeability_issue_stale_evidence: |
-    Your evidence predates the latest reopen and no longer reflects the current code. Recapture the affected artifacts, re-register them with the same `--kind` tags, and refresh the deck.
+    Your evidence predates the latest reopen and no longer reflects the current code. Recapture the affected artifacts, re-register them, and refresh the deck.
 
   captain_merge: |
     You are the Captain merging PR {{ pr_url }} ("{{ title }}", {{ repo }} #{{ pr_number }}). The automatic squash-merge failed; fix what blocked it and complete the merge in this session.
@@ -467,12 +479,12 @@ nudges:
     Your PR is still a draft. Run `/x-pr` to mark it ready for review, then continue until the task is ready for captain review.
 
   missing_evidence: |
-    Your task has no registered evidence. Follow the Evidence Deck section of your brief: run the product visibly, capture real runtime proof (UI: before screenshot, after screenshot, after recording of the action; non-UI: terminal output to a file), register it —
-    `mando todo evidence before.png after.png demo.webm --caption "before: ..." --caption "after: ..." --caption "after: ..." --kind before --kind after --kind after`
-    — and build the deck at `.ai/evidence/deck.html`.
+    Your task has no registered evidence. Follow the Evidence Deck section of your brief: run the product visibly, capture real runtime proof (UI: a screenshot of the end state and a recording of the action; non-UI: terminal output to a file), register it —
+    `mando todo evidence after.png demo.webm --caption "..." --caption "..."`
+    — and build the deck at `.ai/evidence/deck.html`. No "before" capture is needed.
 
   stale_evidence: |
-    Your evidence predates the latest reopen and no longer reflects the current code. Recapture the affected artifacts (UI changes need all three: before screenshot, after screenshot, after recording), re-register them with the same `--kind` tags, and refresh the deck.
+    Your evidence predates the latest reopen and no longer reflects the current code. Recapture the affected artifacts (UI changes need a screenshot and a recording), re-register them, and refresh the deck.
 
   stale_work_summary: |
     Your work summary predates the latest reopen. Run `/x-pr-summary` to regenerate it and save via `mando todo summary`.
@@ -481,7 +493,7 @@ nudges:
     Your session has produced no output for {{ stale_s }}s. Resume your task from where you left off.
 
   reopen_ack: |
-    You were reopened for {{ source_label }} (reopen #{{ reopen_seq }}). Read `.ai/captain-reopen-context.md` and address the feedback. If code changes, recapture the affected evidence and refresh the deck.
+    You were reopened for {{ source_label }} (reopen #{{ reopen_seq }}). Read `.ai/captain-reopen-context.md` and address the feedback — only the listed findings, no new scope. If code changes, recapture the affected evidence and refresh the deck.
 
     When done, post this ack comment on the PR:
     `[mando] {{ ack_prefix }} #{{ reopen_seq }} addressed: <summary>`

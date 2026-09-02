@@ -14,12 +14,18 @@ import {
 } from '#renderer/domains/sessions/runtime/useTranscriptUi';
 
 interface ToolGroupBlockProps {
+  sessionId: string;
   id: string;
   tools: AssistantToolUseBlock[];
   results: Map<string, UserToolResultBlock>;
 }
 
-export function ToolGroupBlock({ id, tools, results }: ToolGroupBlockProps): React.ReactElement {
+export function ToolGroupBlock({
+  id,
+  tools,
+  results,
+  sessionId,
+}: ToolGroupBlockProps): React.ReactElement {
   const userOverride = useTranscriptUi(selectToolOpenState(id));
   const setToolExpanded = useTranscriptUi((s) => s.setToolExpanded);
   const failedCount = tools.filter((tool) => results.get(tool.id)?.isError === true).length;
@@ -46,7 +52,12 @@ export function ToolGroupBlock({ id, tools, results }: ToolGroupBlockProps): Rea
       <CollapsibleContent>
         <div className="ml-4 border-l border-border/60 pb-1 pl-2">
           {tools.map((t) => (
-            <ToolCallBlock key={t.id} toolUse={t} result={results.get(t.id)} />
+            <ToolCallBlock
+              key={t.id}
+              toolUse={t}
+              result={results.get(t.id)}
+              sessionId={sessionId}
+            />
           ))}
         </div>
       </CollapsibleContent>

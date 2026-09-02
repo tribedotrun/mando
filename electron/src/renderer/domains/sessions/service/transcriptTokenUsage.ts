@@ -1,22 +1,26 @@
-import type { TranscriptEvent, TranscriptUsageInfo } from '#renderer/global/types';
+import type { TaskProvider, TranscriptEvent, TranscriptUsageInfo } from '#renderer/global/types';
 import { parseJsonText } from '#result';
 
 interface TranscriptTokenUsageSummary extends TranscriptUsageInfo {
   totalTokens: number;
-  source: 'result' | 'system_token_usage' | 'token_usage_event' | 'assistant_sum';
+  source: 'result' | 'result_sum' | 'system_token_usage' | 'token_usage_event' | 'assistant_sum';
 }
 
 export function summarizeTranscriptTokenUsage(
   events: readonly TranscriptEvent[],
+  provider?: TaskProvider,
 ): TranscriptTokenUsageSummary | null {
   let resultUsage: TranscriptUsageInfo | null = null;
+  let resultSum: TranscriptUsageInfo | null = null;
   let systemTokenUsage: TranscriptUsageInfo | null = null;
   let tokenUsageEvent: TranscriptTokenUsageSummary | null = null;
   let assistantSum: TranscriptUsageInfo | null = null;
+  const claudeMessageIds = new Set<string>();
 
   for (const event of events) {
     if (event.kind === 'result' && event.data.summary.usage) {
       resultUsage = event.data.summary.usage;
+      resultSum = addUsage(resultSum, event.data.summary.usage);
       continue;
     }
     if (event.kind === 'system_token_usage') {
@@ -28,10 +32,17 @@ export function summarizeTranscriptTokenUsage(
       continue;
     }
     if (event.kind === 'assistant' && event.data.usage) {
+      if (provider === 'claude' && event.data.messageId) {
+        if (claudeMessageIds.has(event.data.messageId)) continue;
+        claudeMessageIds.add(event.data.messageId);
+      }
       assistantSum = addUsage(assistantSum, event.data.usage);
     }
   }
 
+  if (provider === 'claude') {
+    return withTotal(resultSum, 'result_sum') ?? withTotal(assistantSum, 'assistant_sum');
+  }
   return (
     withTotal(systemTokenUsage, 'system_token_usage') ??
     tokenUsageEvent ??

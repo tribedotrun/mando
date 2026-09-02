@@ -17,6 +17,9 @@ pub struct UserEvent {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AssistantEvent {
     pub meta: EventMeta,
+    /// Provider message id. Claude emits one JSONL envelope per content block,
+    /// all sharing this id; the renderer uses it to rebuild the API message.
+    pub message_id: Option<String>,
     pub model: Option<String>,
     pub blocks: Vec<AssistantContentBlock>,
     pub usage: Option<TranscriptUsageInfo>,

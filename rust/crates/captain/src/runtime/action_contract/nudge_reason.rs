@@ -30,10 +30,10 @@ pub(super) enum NudgeReasonKind {
     MissingEvidence,
     StaleEvidence,
     StaleWorkSummary,
-    /// `missing <kind> evidence` — `EvidenceKindGap::reason` names which
-    /// typed capture kind is absent (bug-fix or UI before/after).
+    /// `missing UI evidence (screenshot + recording)` — `EvidenceGap::reason`
+    /// names the capture gate a UI deck is failing.
     MissingEvidenceKind,
-    /// `stale <kind> evidence — recapture after reopen`, the same gap after
+    /// `stale UI evidence (...) — recapture after reopen`, the same gap after
     /// a reopen invalidated the captures that exist.
     StaleEvidenceKind,
     InsufficientOutput,
@@ -66,8 +66,8 @@ impl NudgeReasonKind {
             "work summary stale after reopen" => Self::StaleWorkSummary,
             "insufficient output" => Self::InsufficientOutput,
             "you appear stuck" => Self::StreamStale,
-            // `EvidenceKindGap::reason` names the missing capture kind after
-            // the verb, so match the verb rather than restating the sentences
+            // `EvidenceGap::reason` names the failing capture gate after the
+            // verb, so match the verb rather than restating the sentences
             // here — the exact wording lives with the gate that produces it.
             _ if reason.starts_with("missing ") => Self::MissingEvidenceKind,
             _ if reason.starts_with("stale ") => Self::StaleEvidenceKind,
@@ -249,22 +249,13 @@ mod tests {
             ),
             ("insufficient output", NudgeReasonKind::InsufficientOutput),
             ("you appear stuck", NudgeReasonKind::StreamStale),
-            // The four sentences `EvidenceKindGap::reason` can produce.
+            // The two sentences `EvidenceGap::reason` can produce.
             (
-                "missing before/after bug-fix evidence",
+                "missing UI evidence (screenshot + recording)",
                 NudgeReasonKind::MissingEvidenceKind,
             ),
             (
-                "missing before/after UI evidence (screenshots + after recording)",
-                NudgeReasonKind::MissingEvidenceKind,
-            ),
-            (
-                "stale before/after bug-fix evidence — recapture after reopen",
-                NudgeReasonKind::StaleEvidenceKind,
-            ),
-            (
-                "stale before/after UI evidence (screenshots + after recording) \
-                 — recapture after reopen",
+                "stale UI evidence (screenshot + recording) — recapture after reopen",
                 NudgeReasonKind::StaleEvidenceKind,
             ),
         ];

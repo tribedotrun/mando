@@ -782,12 +782,47 @@ mod tests {
             "bug-fix protocol should include the reproduce-first rule"
         );
         assert!(
-            rendered.contains("`--kind before`") && rendered.contains("`--kind after`"),
-            "bug-fix protocol should require both typed captures"
+            !rendered.contains("`--kind before`") && !rendered.contains("`--kind after`"),
+            "no capture may be required to carry a before/after kind tag"
+        );
+        assert!(
+            rendered.contains("No registered \"before\" capture is required"),
+            "bug-fix protocol should say the before capture is not required"
         );
         assert!(
             rendered.contains("`--kind cannot-reproduce`"),
             "bug-fix protocol should cover the cannot-reproduce escape"
+        );
+    }
+
+    #[test]
+    fn worker_evidence_contract_has_no_before_requirement_and_parallel_lanes() {
+        let prompts = captain_prompts();
+        let mut vars = worker_vars();
+        vars.insert("title", "Add dark mode");
+        vars.insert("context", "feature work");
+        vars.insert("branch", "mando/dark-2");
+
+        let rendered = render_prompt("worker", &prompts, &vars).unwrap();
+        assert!(
+            rendered.contains("No \"before\" capture is required"),
+            "evidence contract must not require a before capture"
+        );
+        assert!(
+            !rendered.contains("--kind before"),
+            "evidence contract must not tell the worker to tag a before capture"
+        );
+        assert!(
+            rendered.contains("No `--kind` tag is needed on captures."),
+            "captures register without a kind tag"
+        );
+        assert!(
+            rendered.contains("fan them out as concurrent subagents"),
+            "evidence contract should tell the worker to parallelize proof lanes"
+        );
+        assert!(
+            rendered.contains("The one ordering constraint is code before capture."),
+            "parallel lanes still start only after the code is final"
         );
     }
 
@@ -823,16 +858,65 @@ mod tests {
 
         let rendered = render_prompt("captain_review", &prompts, &vars).unwrap();
         assert!(
-            rendered.contains("Bug fix: the `before` capture"),
+            rendered.contains("Bug fix: the capture must show the reported scenario itself fixed"),
             "captain_review should include the bug-fix evidence rule when flagged"
         );
         assert!(
-            rendered.contains("the `after` the same scenario fixed"),
-            "bug-fix evidence rule should require both before and after"
+            rendered
+                .contains("No `before` capture is required and its absence is never a finding."),
+            "bug-fix evidence rule must not ask for a before capture"
         );
         assert!(
             rendered.contains("`cannot-reproduce` write-up, escalate with it"),
             "bug-fix evidence rule should route cannot-reproduce to escalate"
+        );
+    }
+
+    #[test]
+    fn captain_review_demands_complete_findings_in_one_pass() {
+        let prompts = captain_prompts();
+        let mut vars: FxHashMap<&str, &str> = FxHashMap::default();
+        vars.insert("trigger", "gates_pass");
+        vars.insert("problem_statement", "Add dark mode");
+        vars.insert("worker_contexts", "Worker added theme toggle");
+        vars.insert("knowledge_base", "");
+        vars.insert("evidence_images", "");
+        vars.insert("is_ci_failure", "false");
+        vars.insert("is_bug_fix", "");
+        vars.insert("is_no_pr", "");
+
+        let rendered = render_prompt("captain_review", &prompts, &vars).unwrap();
+        assert!(
+            rendered.contains("## Complete Findings, One Pass"),
+            "review contract must carry the complete-findings section"
+        );
+        assert!(
+            rendered.contains("put every finding in this one verdict, ordered by severity"),
+            "a verdict must enumerate every finding, not the top gap"
+        );
+        assert!(
+            rendered.contains("Findings are observed, not invented."),
+            "review contract must forbid speculative or defensive findings"
+        );
+    }
+
+    #[test]
+    fn reopen_templates_lock_scope_to_listed_findings() {
+        let prompts = captain_prompts();
+        let mut vars: FxHashMap<&str, &str> = FxHashMap::default();
+        vars.insert("reopen_seq", "2");
+        vars.insert("feedback", "Fix the analytics index");
+        vars.insert("images", "");
+
+        let resume = render_prompt("reopen_resume", &prompts, &vars).unwrap();
+        assert!(
+            resume.contains("A fix round is scoped to the listed findings"),
+            "reopen_resume must lock the worker to the listed findings"
+        );
+        let context = render_prompt("reopen_context", &prompts, &vars).unwrap();
+        assert!(
+            context.contains("This round is scoped to the findings above"),
+            "reopen_context must lock the worker to the listed findings"
         );
     }
 

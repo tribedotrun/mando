@@ -85,9 +85,7 @@ export function InfoTab({
           />
           <span>
             {item.is_bug_fix ? 'Yes' : 'No'}
-            <span className="ml-2 text-text-4">
-              (worker reproduces + captures before/after evidence)
-            </span>
+            <span className="ml-2 text-text-4">(worker reproduces the bug before fixing it)</span>
           </span>
         </label>
       </div>

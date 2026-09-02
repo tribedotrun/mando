@@ -9,7 +9,7 @@ mod review_threads;
 mod types;
 
 use anyhow::{Context, Result};
-use command::{run_gh, run_gh_api_paginate, run_gh_capture, run_gh_in_dir};
+use command::{run_gh, run_gh_api_paginate, run_gh_bytes, run_gh_capture, run_gh_in_dir};
 use serde::Deserialize;
 use std::path::Path;
 
@@ -18,6 +18,62 @@ pub use types::{
     MergeBlockReason, MergeOutcome, MergeableStatus, PrComment, PrState, PrStatus, ReviewDecision,
     ReviewThread, ThreadComment,
 };
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GitHubUserAttachment {
+    pub bytes: Vec<u8>,
+    pub content_type: &'static str,
+}
+
+fn valid_user_attachment_id(asset_id: &str) -> bool {
+    asset_id.len() == 36
+        && asset_id.bytes().enumerate().all(|(index, byte)| {
+            if matches!(index, 8 | 13 | 18 | 23) {
+                byte == b'-'
+            } else {
+                byte.is_ascii_hexdigit()
+            }
+        })
+}
+
+fn attachment_content_type(bytes: &[u8]) -> &'static str {
+    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        "image/png"
+    } else if bytes.starts_with(b"\xff\xd8\xff") {
+        "image/jpeg"
+    } else if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
+        "image/gif"
+    } else if bytes.len() >= 12 && bytes.starts_with(b"RIFF") && &bytes[8..12] == b"WEBP" {
+        "image/webp"
+    } else if bytes.starts_with(b"\x1a\x45\xdf\xa3") {
+        "video/webm"
+    } else if bytes.len() >= 12 && &bytes[4..8] == b"ftyp" {
+        if &bytes[8..12] == b"qt  " {
+            "video/quicktime"
+        } else {
+            "video/mp4"
+        }
+    } else {
+        "application/octet-stream"
+    }
+}
+
+/// Download an authenticated GitHub user attachment through the sole `gh`
+/// command boundary. Private-repository attachment URLs otherwise return 404
+/// when loaded directly by Electron.
+pub async fn get_user_attachment(asset_id: &str) -> Result<GitHubUserAttachment> {
+    if !valid_user_attachment_id(asset_id) {
+        anyhow::bail!("invalid GitHub user attachment id");
+    }
+
+    let url = format!("https://github.com/user-attachments/assets/{asset_id}");
+    let bytes = run_gh_bytes(&["api", "-H", "Accept: application/octet-stream", &url]).await?;
+    let content_type = attachment_content_type(&bytes);
+    Ok(GitHubUserAttachment {
+        bytes,
+        content_type,
+    })
+}
 
 #[derive(Debug, Deserialize)]
 struct GhAuthor {
@@ -464,9 +520,40 @@ fn parse_pr_number(url: &str) -> Option<i64> {
 #[cfg(test)]
 mod tests {
     use super::{
-        classify_merge_block, classify_review_decision, merge_block_detail, MergeBlockReason,
-        ReviewDecision,
+        attachment_content_type, classify_merge_block, classify_review_decision,
+        merge_block_detail, valid_user_attachment_id, MergeBlockReason, ReviewDecision,
     };
+
+    #[test]
+    fn validates_only_uuid_shaped_user_attachment_ids() {
+        assert!(valid_user_attachment_id(
+            "196ce199-c4c7-4761-8779-a77e02234ae5"
+        ));
+        assert!(!valid_user_attachment_id("../../settings"));
+        assert!(!valid_user_attachment_id(
+            "196ce199-c4c7-4761-8779-a77e02234aeZ"
+        ));
+    }
+
+    #[test]
+    fn detects_pr_image_and_recording_content_types() {
+        assert_eq!(
+            attachment_content_type(b"\x89PNG\r\n\x1a\nrest"),
+            "image/png"
+        );
+        assert_eq!(
+            attachment_content_type(b"\0\0\0\x18ftypisomrest"),
+            "video/mp4"
+        );
+        assert_eq!(
+            attachment_content_type(b"\0\0\0\x18ftypqt  rest"),
+            "video/quicktime"
+        );
+        assert_eq!(
+            attachment_content_type(b"unknown"),
+            "application/octet-stream"
+        );
+    }
 
     #[test]
     fn classifies_missing_approving_review() {

@@ -79,10 +79,10 @@ pub(crate) enum TodoCommand {
         /// Per-file caption (one per file, same order)
         #[arg(long = "caption", num_args = 1)]
         captions: Vec<String>,
-        /// Per-file role tag, one per file in the same order (`before`,
-        /// `after`, `cannot-reproduce`, or `other`). Required for bug-fix
-        /// tasks: captain pairs at least one `before` with one `after`
-        /// before shipping. Pass `cannot-reproduce` (with a text file
+        /// Optional per-file role tag, one per file in the same order
+        /// (`before`, `after`, `cannot-reproduce`, or `other`). Captures
+        /// need no tag; captain never requires a `before`. Pass
+        /// `cannot-reproduce` (with a text file
         /// explaining the repro attempt) when the bug cannot be triggered
         /// — captain escalates to the human deterministically. Omit (or
         /// pass `other`) for non-bug-fix tasks.

@@ -52,14 +52,7 @@ fn base_ctx() -> WorkerContext {
         work_summary_fresh: true,
         has_screenshot: true,
         has_recording: true,
-        evidence_kinds: crate::EvidenceKindGates {
-            before_screenshot: true,
-            after_screenshot: true,
-            after_recording: true,
-            before_fix: true,
-            after_fix: true,
-            cannot_reproduce: false,
-        },
+        has_cannot_reproduce: false,
     }
 }
 

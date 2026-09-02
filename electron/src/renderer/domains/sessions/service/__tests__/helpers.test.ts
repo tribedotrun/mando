@@ -7,14 +7,18 @@ import {
   cleanThinkingText,
   compactDisplayPath,
   diffLineTone,
+  extractToolResultText,
   fileChangeSummary,
   toolGroupSummary,
 } from '../transcriptRenderHelpers.ts';
 import {
+  buildProviderTranscriptRenderRows,
   buildTranscriptRenderRows,
   groupAssistantBlocks,
   isMandoTaskPromptBody,
   mandoPromptLabel,
+  parseClaudeRateLimitInfo,
+  resolveActiveBranch,
   transcriptEventSearchText,
 } from '../transcriptEvents.ts';
 import type {
@@ -59,6 +63,7 @@ function assistantEvent(
     kind: 'assistant',
     data: {
       meta: eventMeta(lineNumber, `event-${lineNumber}`),
+      messageId: null,
       model: 'gpt-5.6-luna',
       blocks: [block],
       usage: null,
@@ -88,6 +93,7 @@ describe('buildResumeCmd', () => {
           timestamp: null,
           isSidechain: null,
         },
+        messageId: null,
         model: null,
         blocks: [{ kind: 'thinking', data: { text: 'Inspecting localStorage behavior' } }],
         usage: null,
@@ -165,6 +171,7 @@ describe('Codex transcript presentation helpers', () => {
     const items = groupAssistantBlocks(
       {
         meta: eventMeta(1, 'assistant-1'),
+        messageId: null,
         model: null,
         blocks: [
           { kind: 'tool_use', data: tool },
@@ -245,5 +252,128 @@ describe('Codex transcript presentation helpers', () => {
       'Clarifier instructions',
     );
     assert.equal(mandoPromptLabel('You are the person using this app.'), null);
+  });
+});
+
+describe('Claude transcript presentation helpers', () => {
+  it('renders tool-result images instead of a placeholder string', () => {
+    assert.equal(
+      extractToolResultText({
+        toolUseId: 'tool-1',
+        content: {
+          kind: 'blocks',
+          data: {
+            blocks: [
+              { kind: 'image', data: { mediaType: 'image/png', dataLen: 123 } },
+              { kind: 'text', data: { text: 'caption' } },
+            ],
+          },
+        },
+        isError: false,
+      }),
+      'caption',
+    );
+  });
+
+  it('hides Claude image sizing carrier messages from the transcript', () => {
+    const imageMetadata: TranscriptEvent = {
+      kind: 'user',
+      data: {
+        meta: eventMeta(2, 'image-metadata'),
+        blocks: [
+          {
+            kind: 'text',
+            data: {
+              text: '[Image: original 1290x2796, displayed at 923x2000. Multiply coordinates by 1.40 to map to original image.]',
+            },
+          },
+        ],
+      },
+    };
+
+    assert.deepEqual(buildProviderTranscriptRenderRows([imageMetadata], 'claude'), []);
+    assert.equal(buildProviderTranscriptRenderRows([imageMetadata], 'codex').length, 1);
+  });
+
+  it('drops empty signed thinking blocks instead of rendering a brain-only row', () => {
+    const event = assistantEvent(1, {
+      kind: 'thinking',
+      data: { text: '  ' },
+    });
+    if (event.kind !== 'assistant') return;
+    event.data.blocks.push(
+      { kind: 'tool_use', data: bashTool('tool-1', 'pwd') },
+      { kind: 'thinking', data: { text: '' } },
+      { kind: 'tool_use', data: bashTool('tool-2', 'git status') },
+    );
+
+    const items = groupAssistantBlocks(event.data, 1);
+
+    assert.equal(items.length, 1);
+    assert.equal(items[0]?.kind, 'group');
+    if (items[0]?.kind !== 'group') return;
+    assert.equal(items[0].group.tools.length, 2);
+  });
+
+  it('reassembles content-block envelopes by Claude API message id', () => {
+    const thinking = assistantEvent(1, { kind: 'thinking', data: { text: 'Inspecting' } });
+    const tool = assistantEvent(2, {
+      kind: 'tool_use',
+      data: bashTool('tool-1', 'git status'),
+    });
+    if (thinking.kind !== 'assistant' || tool.kind !== 'assistant') return;
+    thinking.data.messageId = 'msg-1';
+    tool.data.messageId = 'msg-1';
+
+    const active = resolveActiveBranch([thinking, tool], 'claude');
+
+    assert.equal(active.length, 1);
+    assert.equal(active[0]?.kind, 'assistant');
+    if (active[0]?.kind !== 'assistant') return;
+    assert.deepEqual(
+      active[0].data.blocks.map((block) => block.kind),
+      ['thinking', 'tool_use'],
+    );
+  });
+
+  it('does not apply Codex cross-message activity grouping to Claude', () => {
+    const rows = buildProviderTranscriptRenderRows(
+      [
+        assistantEvent(1, { kind: 'tool_use', data: bashTool('tool-1', 'pwd') }),
+        assistantEvent(2, { kind: 'tool_use', data: bashTool('tool-2', 'git status') }),
+      ],
+      'claude',
+    );
+    assert.deepEqual(
+      rows.map((row) => row.kind),
+      ['event', 'event'],
+    );
+  });
+
+  it('parses every Fable quota window and overage signal', () => {
+    const info = parseClaudeRateLimitInfo(
+      JSON.stringify({
+        status: 'allowed',
+        resetsAt: 1788339600,
+        rateLimitType: 'five_hour',
+        overageStatus: 'rejected',
+        overageDisabledReason: 'org_level_disabled',
+        isUsingOverage: false,
+        unifiedWindows: {
+          five_hour: { utilization: 0.11, resetsAt: 1788339600 },
+          seven_day: { utilization: 0.05, resetsAt: 1788364800 },
+        },
+      }),
+    );
+
+    assert.equal(info?.status, 'allowed');
+    assert.equal(info?.overageDisabledReason, 'org_level_disabled');
+    assert.deepEqual(
+      info?.windows.map((window) => [window.name, window.utilization]),
+      [
+        ['five_hour', 0.11],
+        ['seven_day', 0.05],
+      ],
+    );
   });
 });

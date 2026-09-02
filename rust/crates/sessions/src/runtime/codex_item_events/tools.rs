@@ -249,6 +249,7 @@ fn emit_tool_events(
         state.tool_started_items.insert(id.clone());
         events.push(TranscriptEvent::Assistant(AssistantEvent {
             meta: meta.clone(),
+            message_id: None,
             model: state.model(),
             blocks: vec![AssistantContentBlock::ToolUse(AssistantToolUseBlock {
                 id: id.clone(),

@@ -3,8 +3,11 @@ import type {
   AssistantEvent,
   AssistantToolUseBlock,
   TranscriptEvent,
+  TaskProvider,
   UserToolResultBlock,
 } from '#renderer/global/types';
+import { cleanThinkingText } from '#renderer/domains/sessions/service/transcriptRenderHelpers';
+import { parseJsonText } from '#result';
 
 /**
  * Map tool_use.id to the `tool_result` block a later user message carried.
@@ -147,6 +150,13 @@ export function groupAssistantBlocks(
       pendingGroup.push(block.data);
       return;
     }
+    if (
+      (block.kind === 'text' && !block.data.text.trim()) ||
+      ((block.kind === 'thinking' || block.kind === 'advisor_tool_result') &&
+        !cleanThinkingText(block.data.text))
+    ) {
+      return;
+    }
     flushGroup();
     out.push({ kind: 'block', block, eventIndex, blockIndex });
   });
@@ -241,6 +251,41 @@ export function buildTranscriptRenderRows(
   return rows;
 }
 
+/**
+ * Claude and Codex streams have different carrier protocols. Codex emits
+ * separate activity items that can be grouped across carrier rows; Claude
+ * emits complete API messages split into block envelopes sharing messageId.
+ */
+export function buildProviderTranscriptRenderRows(
+  events: readonly TranscriptEvent[],
+  provider: TaskProvider | undefined,
+): TranscriptRenderRow[] {
+  if (provider !== 'claude') return buildTranscriptRenderRows(events);
+  return events.flatMap((event, eventIndex) => {
+    if (isTransparentActivityEvent(event) || isClaudeImageMetadataEvent(event)) return [];
+    return [
+      {
+        kind: 'event' as const,
+        id: `event-${eventIndex}`,
+        event,
+        eventIndex,
+        searchEvents: [event],
+      },
+    ];
+  });
+}
+
+const CLAUDE_IMAGE_METADATA =
+  /^\[Image: original \d+x\d+, displayed at \d+x\d+\. Multiply coordinates by \d+(?:\.\d+)? to map to original image\.\]$/;
+
+/** Claude Code emits this internal sizing hint immediately after an image tool result. */
+function isClaudeImageMetadataEvent(event: TranscriptEvent): boolean {
+  if (event.kind !== 'user' || event.data.blocks.length === 0) return false;
+  return event.data.blocks.every(
+    (block) => block.kind === 'text' && CLAUDE_IMAGE_METADATA.test(block.data.text.trim()),
+  );
+}
+
 function toolOnlyAssistantBlocks(event: TranscriptEvent): AssistantToolUseBlock[] | null {
   if (event.kind !== 'assistant' || event.data.blocks.length === 0) return null;
   const tools: AssistantToolUseBlock[] = [];
@@ -254,6 +299,9 @@ function toolOnlyAssistantBlocks(event: TranscriptEvent): AssistantToolUseBlock[
 function isTransparentActivityEvent(event: TranscriptEvent): boolean {
   return (
     isCarrierUserEvent(event) ||
+    event.kind === 'system_hook' ||
+    event.kind === 'system_thinking_tokens' ||
+    event.kind === 'system_claude_progress' ||
     event.kind === 'system_token_usage' ||
     event.kind === 'tool_progress'
   );
@@ -264,12 +312,17 @@ function isTransparentActivityEvent(event: TranscriptEvent): boolean {
  * flagged `isSidechain: true` so a sub-agent transcript doesn't drown the
  * main thread. Sidechain expansion is a future UI affordance.
  */
-export function resolveActiveBranch(events: readonly TranscriptEvent[]): TranscriptEvent[] {
+export function resolveActiveBranch(
+  events: readonly TranscriptEvent[],
+  provider?: TaskProvider,
+): TranscriptEvent[] {
   const branch = events.filter((event) => {
     const isSide = metaOf(event)?.isSidechain === true;
     return !isSide;
   });
-  return coalesceStreamingAssistantDeltas(branch);
+  return provider === 'claude'
+    ? coalesceClaudeAssistantMessages(branch)
+    : coalesceStreamingAssistantDeltas(branch);
 }
 
 function metaOf(event: TranscriptEvent) {
@@ -282,6 +335,7 @@ function metaOf(event: TranscriptEvent) {
     case 'system_hook':
     case 'system_rate_limit':
     case 'system_thinking_tokens':
+    case 'system_claude_progress':
     case 'system_token_usage':
     case 'user':
     case 'assistant':
@@ -290,6 +344,93 @@ function metaOf(event: TranscriptEvent) {
     case 'unknown':
       return event.data.meta;
   }
+}
+
+function coalesceClaudeAssistantMessages(events: readonly TranscriptEvent[]): TranscriptEvent[] {
+  const out: TranscriptEvent[] = [];
+  const messageIndexes = new Map<string, number>();
+  for (const event of events) {
+    if (event.kind !== 'assistant' || !event.data.messageId) {
+      out.push(event);
+      continue;
+    }
+    const priorIndex = messageIndexes.get(event.data.messageId);
+    if (priorIndex === undefined) {
+      messageIndexes.set(event.data.messageId, out.length);
+      out.push(event);
+      continue;
+    }
+    const prior = out[priorIndex];
+    if (!prior || prior.kind !== 'assistant') {
+      out.push(event);
+      continue;
+    }
+    out[priorIndex] = {
+      ...prior,
+      data: {
+        ...prior.data,
+        model: event.data.model ?? prior.data.model,
+        usage: event.data.usage ?? prior.data.usage,
+        stopReason: event.data.stopReason ?? prior.data.stopReason,
+        blocks: [...prior.data.blocks, ...event.data.blocks],
+      },
+    };
+  }
+  return out;
+}
+
+export interface ClaudeRateLimitWindow {
+  name: string;
+  utilization: number | null;
+  resetsAt: number | null;
+}
+
+export interface ClaudeRateLimitInfo {
+  status: string;
+  rateLimitType: string | null;
+  resetsAt: number | null;
+  overageStatus: string | null;
+  overageDisabledReason: string | null;
+  isUsingOverage: boolean | null;
+  windows: ClaudeRateLimitWindow[];
+}
+
+export function parseClaudeRateLimitInfo(raw: string): ClaudeRateLimitInfo | null {
+  const parsed = parseJsonText(raw, 'transcriptEvents:claudeRateLimit');
+  if (parsed.isErr()) return null;
+  const root = recordValue(parsed.value);
+  if (!root) return null;
+  const unifiedWindows = recordValue(root.unifiedWindows);
+  const windows = Object.entries(unifiedWindows ?? {}).map(([name, value]) => {
+    const window = recordValue(value);
+    return {
+      name,
+      utilization: finiteNumber(window?.utilization),
+      resetsAt: finiteNumber(window?.resetsAt),
+    };
+  });
+  return {
+    status: stringValue(root.status) ?? 'unknown',
+    rateLimitType: stringValue(root.rateLimitType),
+    resetsAt: finiteNumber(root.resetsAt),
+    overageStatus: stringValue(root.overageStatus),
+    overageDisabledReason: stringValue(root.overageDisabledReason),
+    isUsingOverage: typeof root.isUsingOverage === 'boolean' ? root.isUsingOverage : null,
+    windows,
+  };
+}
+
+function recordValue(value: unknown): Record<string, unknown> | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function finiteNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function stringValue(value: unknown): string | null {
+  return typeof value === 'string' ? value : null;
 }
 
 function coalesceStreamingAssistantDeltas(events: readonly TranscriptEvent[]): TranscriptEvent[] {

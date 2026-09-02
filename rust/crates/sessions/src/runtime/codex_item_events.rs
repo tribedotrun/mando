@@ -270,6 +270,7 @@ fn agent_message_event(
     (!text.is_empty() && state.content_items.insert(id)).then_some(TranscriptEvent::Assistant(
         AssistantEvent {
             meta,
+            message_id: None,
             model: state.model(),
             blocks: vec![AssistantContentBlock::Text(AssistantTextBlock { text })],
             usage: None,
@@ -293,6 +294,7 @@ fn thinking_event(
     (!text.is_empty() && state.content_items.insert(id)).then_some(TranscriptEvent::Assistant(
         AssistantEvent {
             meta,
+            message_id: None,
             model: None,
             blocks: vec![AssistantContentBlock::Thinking(AssistantThinkingBlock {
                 text,

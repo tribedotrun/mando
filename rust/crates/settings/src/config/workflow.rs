@@ -655,8 +655,8 @@ prompts:
         // key, so a dropped `agent.cc_effort` fails to deserialize instead
         // of silently downgrading every spawn's thinking budget.
         let wf = CaptainWorkflow::compiled_default();
-        assert_eq!(wf.agent.cc_effort, global_claude::Effort::Max);
-        assert_eq!(wf.agent.cc_effort.as_str(), "max");
+        assert_eq!(wf.agent.cc_effort, global_claude::Effort::High);
+        assert_eq!(wf.agent.cc_effort.as_str(), "high");
     }
 
     #[test]

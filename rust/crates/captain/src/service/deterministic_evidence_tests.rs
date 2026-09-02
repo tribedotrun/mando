@@ -4,9 +4,9 @@
 
 use super::*;
 
-// ── Typed evidence-kind gates (deterministic pre-review routing) ──
+// ── UI capture gate (deterministic pre-review routing) ──
 
-/// A UI diff, so the three-artifact rule binds.
+/// A UI diff, so the screenshot + recording rule binds.
 fn ui_ctx() -> WorkerContext {
     let mut ctx = base_ctx();
     ctx.process_alive = false;
@@ -15,9 +15,9 @@ fn ui_ctx() -> WorkerContext {
 }
 
 #[test]
-fn ui_missing_after_recording_nudges_instead_of_gates_pass() {
+fn ui_missing_recording_nudges_instead_of_gates_pass() {
     let mut ctx = ui_ctx();
-    ctx.evidence_kinds.after_recording = false;
+    ctx.has_recording = false;
     let a = classify(&ctx, &base_item(), Some(true));
     assert_eq!(
         a.action,
@@ -35,60 +35,46 @@ fn ui_missing_after_recording_nudges_instead_of_gates_pass() {
 }
 
 #[test]
-fn ui_missing_before_screenshot_nudges() {
+fn ui_missing_screenshot_nudges() {
     let mut ctx = ui_ctx();
-    ctx.evidence_kinds.before_screenshot = false;
+    ctx.has_screenshot = false;
     let a = classify(&ctx, &base_item(), Some(true));
     assert_eq!(a.action, ActionKind::Nudge);
     assert!(a.reason.unwrap().contains("UI evidence"));
 }
 
 #[test]
-fn ui_complete_deck_reaches_gates_pass() {
-    let ctx = ui_ctx(); // base_ctx seeds all three kinds true
+fn ui_screenshot_and_recording_reach_gates_pass_without_any_kind_tag() {
+    // base_ctx registers untagged captures (no before/after kinds at all);
+    // that is a complete UI deck.
+    let ctx = ui_ctx();
     let a = classify(&ctx, &base_item(), Some(true));
     assert_eq!(a.action, ActionKind::CaptainReview);
     assert_eq!(a.reason.as_deref(), Some("gates_pass"));
 }
 
 #[test]
-fn backend_only_diff_is_not_held_to_ui_kinds() {
+fn backend_only_diff_is_not_held_to_captures() {
     let mut ctx = base_ctx();
     ctx.process_alive = false;
     ctx.changed_files = vec!["rust/crates/captain/src/service/deterministic.rs".into()];
-    ctx.evidence_kinds = crate::EvidenceKindGates::default();
+    ctx.has_screenshot = false;
+    ctx.has_recording = false;
     let a = classify(&ctx, &base_item(), Some(true));
     assert_eq!(
         a.action,
         ActionKind::CaptainReview,
-        "a non-UI, non-bug-fix change must not owe before/after screenshots"
+        "a non-UI change must not owe screenshots or recordings"
     );
     assert_eq!(a.reason.as_deref(), Some("gates_pass"));
 }
 
 #[test]
-fn bug_fix_without_before_after_nudges() {
-    let mut ctx = base_ctx();
-    ctx.process_alive = false;
-    ctx.evidence_kinds = crate::EvidenceKindGates {
-        after_fix: true,
-        ..crate::EvidenceKindGates::default()
-    };
-    let mut item = base_item();
-    item.is_bug_fix = true;
-    let a = classify(&ctx, &item, Some(true));
-    assert_eq!(a.action, ActionKind::Nudge);
-    assert!(a.reason.unwrap().contains("bug-fix evidence"));
-}
-
-#[test]
-fn bug_fix_cannot_reproduce_satisfies_the_gate() {
-    let mut ctx = base_ctx();
-    ctx.process_alive = false;
-    ctx.evidence_kinds = crate::EvidenceKindGates {
-        cannot_reproduce: true,
-        ..crate::EvidenceKindGates::default()
-    };
+fn bug_fix_with_fresh_captures_reaches_gates_pass() {
+    // A bug fix owes the same proof as any other change: the fix working.
+    // There is no before/after pairing gate.
+    let mut ctx = ui_ctx();
+    ctx.has_cannot_reproduce = false;
     let mut item = base_item();
     item.is_bug_fix = true;
     let a = classify(&ctx, &item, Some(true));
@@ -97,11 +83,37 @@ fn bug_fix_cannot_reproduce_satisfies_the_gate() {
 }
 
 #[test]
-fn stale_kind_gate_routes_to_stale_evidence_nudge() {
+fn bug_fix_ui_deck_without_recording_still_nudges() {
+    let mut ctx = ui_ctx();
+    ctx.has_recording = false;
+    let mut item = base_item();
+    item.is_bug_fix = true;
+    let a = classify(&ctx, &item, Some(true));
+    assert_eq!(a.action, ActionKind::Nudge);
+    assert!(a.reason.unwrap().contains("UI evidence"));
+}
+
+#[test]
+fn bug_fix_cannot_reproduce_satisfies_every_capture_gate() {
+    // The write-up is the whole deliverable: even a UI diff owes no captures.
+    let mut ctx = ui_ctx();
+    ctx.has_screenshot = false;
+    ctx.has_recording = false;
+    ctx.has_cannot_reproduce = true;
+    let mut item = base_item();
+    item.is_bug_fix = true;
+    let a = classify(&ctx, &item, Some(true));
+    assert_eq!(a.action, ActionKind::CaptainReview);
+    assert_eq!(a.reason.as_deref(), Some("gates_pass"));
+}
+
+#[test]
+fn stale_capture_gate_routes_to_stale_evidence_nudge() {
     let mut ctx = ui_ctx();
     ctx.evidence_fresh = false;
     ctx.reopen_seq = 1;
-    ctx.evidence_kinds = crate::EvidenceKindGates::default();
+    ctx.has_screenshot = false;
+    ctx.has_recording = false;
     let a = classify(&ctx, &base_item(), Some(true));
     assert_eq!(a.action, ActionKind::Nudge);
     assert!(
@@ -114,12 +126,13 @@ fn stale_kind_gate_routes_to_stale_evidence_nudge() {
 }
 
 #[test]
-fn degraded_context_still_wins_over_kind_gates() {
+fn degraded_context_still_wins_over_capture_gates() {
     // A degraded PR fetch has an empty changed_files list; the classifier
     // must route to review, not manufacture a UI evidence nudge.
     let mut ctx = ui_ctx();
     ctx.degraded = true;
-    ctx.evidence_kinds = crate::EvidenceKindGates::default();
+    ctx.has_screenshot = false;
+    ctx.has_recording = false;
     let a = classify(&ctx, &base_item(), Some(true));
     assert_eq!(a.action, ActionKind::CaptainReview);
     assert_eq!(a.reason.as_deref(), Some("degraded_context"));

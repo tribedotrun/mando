@@ -52,7 +52,7 @@ settings = [
 
 # Transports
 transport-http = [
-    "api-types", "captain", "global-bus", "global-claude",
+    "api-types", "captain", "global-bus", "global-claude", "global-github",
     "global-types", "global-infra", "scout", "sessions", "settings",
     "transport-tg", "transport-ui"
 ]

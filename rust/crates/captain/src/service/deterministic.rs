@@ -15,9 +15,7 @@ use super::deterministic_helpers::{
     action, classify_unresolved_threads, detect_broken_session_symptom, has_substantive_output,
     render_nudge,
 };
-use super::worker_context::{
-    bug_fix_evidence_gap, has_summary_diagram, touches_ui, ui_evidence_gap, EvidenceKindGap,
-};
+use super::worker_context::{has_summary_diagram, touches_ui, ui_evidence_gap, EvidenceGap};
 
 /// Deterministic classification. Every input shape produces exactly one
 /// `Action`; there is no fallthrough. Returns `Err` only when a required
@@ -183,8 +181,8 @@ fn quality_gates_pass(
     if stream_result_clean != Some(true) {
         return false;
     }
-    // PR path. The typed evidence-kind gates are part of this conjunction so
-    // a `gates_pass` review can never fire on an incomplete deck — the new
+    // PR path. The evidence capture gate is part of this conjunction so a
+    // `gates_pass` review can never fire on an incomplete deck — the
     // `captain_review` prompt states these gates already ran and tells the
     // reviewer not to re-check them.
     if ctx.pr.is_some()
@@ -197,7 +195,7 @@ fn quality_gates_pass(
         && has_summary_diagram(ctx)
         && ctx.has_evidence
         && ctx.evidence_fresh
-        && evidence_kind_gap(ctx, is_bug_fix).is_none()
+        && evidence_gap(ctx, is_bug_fix).is_none()
     {
         return true;
     }
@@ -212,31 +210,23 @@ fn quality_gates_pass(
     false
 }
 
-/// Which typed evidence-kind gate this task is failing, if any.
+/// Which evidence capture gate this task is failing, if any.
 ///
-/// Two shapes, per the evidence contract in `captain-workflow.yaml`:
-/// - UI work needs a `before` screenshot, an `after` screenshot, and an
-///   `after` recording.
-/// - A bug fix needs a `before` and an `after`, or a `cannot-reproduce`
-///   write-up.
+/// One shape, per the evidence contract in `captain-workflow.yaml`: UI work
+/// needs a screenshot of the end state and a recording of the action. No
+/// "before" capture exists as a requirement anywhere.
 ///
-/// A backend-only, non-bug-fix change is held to neither: its deck is
+/// A bug fix whose worker registered a `cannot-reproduce` write-up owes no
+/// captures: nothing was changed, and the reviewer escalates the write-up.
+/// A backend-only change is held to no capture gate either: its deck is
 /// terminal output, which the coarse `has_evidence` gate already covers.
-fn evidence_kind_gap(
-    ctx: &WorkerContext,
-    is_bug_fix: bool,
-) -> Option<(EvidenceKindGap, &'static str)> {
-    if is_bug_fix {
-        if let Some(gap) = bug_fix_evidence_gap(ctx) {
-            return Some((gap, "before/after bug-fix evidence"));
-        }
+fn evidence_gap(ctx: &WorkerContext, is_bug_fix: bool) -> Option<(EvidenceGap, &'static str)> {
+    if is_bug_fix && ctx.has_cannot_reproduce {
+        return None;
     }
     if touches_ui(ctx) {
         if let Some(gap) = ui_evidence_gap(ctx) {
-            return Some((
-                gap,
-                "before/after UI evidence (screenshots + after recording)",
-            ));
+            return Some((gap, "UI evidence (screenshot + recording)"));
         }
     }
     None
@@ -275,7 +265,7 @@ fn diagnose_failing_gates(
             failures.push("stale evidence -- recapture after reopen".into());
         }
         if ctx.pr.is_some() && ctx.has_evidence && ctx.evidence_fresh {
-            if let Some((gap, what)) = evidence_kind_gap(ctx, is_bug_fix) {
+            if let Some((gap, what)) = evidence_gap(ctx, is_bug_fix) {
                 failures.push(gap.reason(what));
             }
         }
@@ -422,12 +412,12 @@ fn missing_gate_nudge(
             "work summary stale after reopen",
         )));
     }
-    // Typed evidence-kind gates. Evidence exists and is fresh, but the deck is
-    // missing a required kind (UI before/after/recording, or bug-fix
-    // before/after). Routes to the same `missing_evidence` / `stale_evidence`
-    // nudges rather than letting the reviewer discover the gap.
+    // Capture gate. Evidence exists and is fresh, but a UI deck is missing its
+    // screenshot or recording. Routes to the same `missing_evidence` /
+    // `stale_evidence` nudges rather than letting the reviewer discover the
+    // gap.
     if !ctx.degraded && ctx.pr.is_some() {
-        if let Some((gap, what)) = evidence_kind_gap(ctx, is_bug_fix) {
+        if let Some((gap, what)) = evidence_gap(ctx, is_bug_fix) {
             let msg = render_nudge(nudges, gap.nudge_key(), &vars)?;
             return Ok(Some(action(
                 ctx,

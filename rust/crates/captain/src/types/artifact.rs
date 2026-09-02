@@ -54,9 +54,9 @@ pub struct ArtifactMedia {
     /// Per-file caption describing what this media shows.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub caption: Option<String>,
-    /// Typed role: `BeforeFix` / `AfterFix` for bug-fix tasks, `Other` (or
-    /// `None` legacy) otherwise. Captain gates the bug-fix evidence rule
-    /// off this field rather than caption text.
+    /// Typed role. `CannotReproduce` is the only kind captain gates on: a
+    /// bug-fix write-up that stands in for captures. `BeforeFix` / `AfterFix`
+    /// are optional labels the feed uses for display; no gate requires them.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub kind: Option<EvidenceKind>,
 }

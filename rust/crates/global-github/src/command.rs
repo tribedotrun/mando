@@ -14,6 +14,29 @@ pub(crate) async fn run_gh_in_dir(cwd: &Path, args: &[&str]) -> Result<String> {
     run_gh_with_cwd(Some(cwd), args).await
 }
 
+/// Run a read-only `gh` command whose successful stdout is binary data.
+pub(crate) async fn run_gh_bytes(args: &[&str]) -> Result<Vec<u8>> {
+    let owned: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+    retry_on_transient(
+        &gh_retry_config(),
+        |e: &anyhow::Error| classify_cli_error(&e.to_string()),
+        || {
+            let owned = owned.clone();
+            async move {
+                let str_refs: Vec<&str> = owned.iter().map(String::as_str).collect();
+                let output = spawn_gh(None, &str_refs).await?;
+                if !output.status.success() {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    let cmd = owned.first().cloned().unwrap_or_default();
+                    anyhow::bail!("gh {} failed: {}", cmd, stderr.trim());
+                }
+                Ok(output.stdout)
+            }
+        },
+    )
+    .await
+}
+
 /// Raw result of a single `gh` invocation, non-zero exit included.
 pub(crate) struct GhOutput {
     pub(crate) success: bool,

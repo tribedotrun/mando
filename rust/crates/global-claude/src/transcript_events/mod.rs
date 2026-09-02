@@ -16,10 +16,10 @@ use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 
 use api_types::{
-    EventIndex, EventMeta, HookPhase, McpServerStatus, SystemApiRetryEvent,
-    SystemCompactBoundaryEvent, SystemHookEvent, SystemInitEvent, SystemLocalCommandOutputEvent,
-    SystemRateLimitEvent, SystemStatusEvent, SystemThinkingTokensEvent, ToolProgressEvent,
-    TranscriptEvent, UnknownEvent, UserEvent,
+    ClaudeProgressKind, EventIndex, EventMeta, HookPhase, McpServerStatus, SystemApiRetryEvent,
+    SystemClaudeProgressEvent, SystemCompactBoundaryEvent, SystemHookEvent, SystemInitEvent,
+    SystemLocalCommandOutputEvent, SystemRateLimitEvent, SystemStatusEvent,
+    SystemThinkingTokensEvent, ToolProgressEvent, TranscriptEvent, UnknownEvent, UserEvent,
 };
 
 use crate::transcript_events::helpers::{parse_permission_mode, string_array};
@@ -213,6 +213,18 @@ fn parse_event_value(val: &serde_json::Value, raw_line: &str, line_number: u32) 
             Some("thinking_tokens") => {
                 TranscriptEvent::SystemThinkingTokens(SystemThinkingTokensEvent { meta })
             }
+            Some("task_started") => claude_progress(meta, ClaudeProgressKind::TaskStarted),
+            Some("task_notification") => {
+                claude_progress(meta, ClaudeProgressKind::TaskNotification)
+            }
+            Some("background_tasks_changed") => {
+                claude_progress(meta, ClaudeProgressKind::BackgroundTasksChanged)
+            }
+            Some("task_updated") => claude_progress(meta, ClaudeProgressKind::TaskUpdated),
+            Some("code_change_published") => {
+                claude_progress(meta, ClaudeProgressKind::CodeChangePublished)
+            }
+            Some("vcs_state_changed") => claude_progress(meta, ClaudeProgressKind::VcsStateChanged),
             _ => unknown(meta, raw_type, raw_subtype, raw_line),
         },
         Some("rate_limit_event") => TranscriptEvent::SystemRateLimit(SystemRateLimitEvent {
@@ -244,6 +256,13 @@ fn parse_event_value(val: &serde_json::Value, raw_line: &str, line_number: u32) 
         }
         _ => unknown(meta, raw_type, raw_subtype, raw_line),
     }
+}
+
+fn claude_progress(meta: EventMeta, progress_kind: ClaudeProgressKind) -> TranscriptEvent {
+    TranscriptEvent::SystemClaudeProgress(SystemClaudeProgressEvent {
+        meta,
+        progress_kind,
+    })
 }
 
 fn unknown(
@@ -407,7 +426,7 @@ mod tests {
 
     #[test]
     fn parse_assistant_with_tool_use_maps_named_tool() {
-        let line = r#"{"type":"assistant","uuid":"a1","message":{"model":"opus","content":[{"type":"text","text":"hi"},{"type":"tool_use","id":"tu1","name":"Bash","input":{"command":"ls -la","description":"list"}}]}}"#;
+        let line = r#"{"type":"assistant","uuid":"a1","message":{"id":"msg-1","model":"opus","content":[{"type":"text","text":"hi"},{"type":"tool_use","id":"tu1","name":"Bash","input":{"command":"ls -la","description":"list"}}]}}"#;
         let path = temp_file(line);
         let events = parse_events(&path);
         assert_eq!(events.len(), 1);
@@ -415,6 +434,7 @@ mod tests {
             panic!("expected Assistant");
         };
         assert_eq!(evt.model.as_deref(), Some("opus"));
+        assert_eq!(evt.message_id.as_deref(), Some("msg-1"));
         assert_eq!(evt.blocks.len(), 2);
         let AssistantContentBlock::ToolUse(tool) = &evt.blocks[1] else {
             panic!("expected tool_use block");
@@ -505,6 +525,42 @@ mod tests {
         assert_eq!(evt.summary.num_turns, Some(3));
         assert_eq!(evt.summary.total_cost_usd, Some(0.01));
         assert!(!evt.summary.is_error);
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn parse_fable_model_usage_accepts_camel_case_token_fields() {
+        let line = r#"{"type":"result","subtype":"success","modelUsage":{"claude-fable-5-1":{"inputTokens":12784,"outputTokens":65096,"cacheReadInputTokens":16849759,"cacheCreationInputTokens":293098,"costUSD":13.457,"contextWindow":1000000}}}"#;
+        let path = temp_file(line);
+        let events = parse_events(&path);
+        let TranscriptEvent::Result(event) = &events[0] else {
+            panic!("expected Result");
+        };
+        let usage = &event.summary.model_usage[0].usage;
+        assert_eq!(usage.input_tokens, 12_784);
+        assert_eq!(usage.output_tokens, 65_096);
+        assert_eq!(usage.cache_read_tokens, 16_849_759);
+        assert_eq!(usage.cache_creation_tokens, 293_098);
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn parse_fable_task_progress_as_named_system_events() {
+        let content = [
+            r#"{"type":"system","subtype":"task_started"}"#,
+            r#"{"type":"system","subtype":"task_notification"}"#,
+            r#"{"type":"system","subtype":"background_tasks_changed"}"#,
+            r#"{"type":"system","subtype":"task_updated"}"#,
+            r#"{"type":"system","subtype":"code_change_published"}"#,
+            r#"{"type":"system","subtype":"vcs_state_changed"}"#,
+        ]
+        .join("\n");
+        let path = temp_file(&content);
+        let events = parse_events(&path);
+        assert_eq!(events.len(), 6);
+        assert!(events
+            .iter()
+            .all(|event| matches!(event, TranscriptEvent::SystemClaudeProgress(_))));
         std::fs::remove_file(&path).ok();
     }
 

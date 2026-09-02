@@ -435,6 +435,18 @@ pub mod routes {
         event: None,
     };
 
+    pub const GET_GITHUB_ATTACHMENTS_BY_ID: RouteDescriptor = RouteDescriptor {
+        method: api_types::RouteMethod::Get,
+        path: "/api/github/attachments/{id}",
+        transport: api_types::RouteTransport::Static,
+        auth: api_types::RouteAuth::Protected,
+        params: Some("api_types::GitHubUserAttachmentParams"),
+        query: None,
+        body: None,
+        response: None,
+        event: None,
+    };
+
     pub const GET_HEALTH: RouteDescriptor = RouteDescriptor {
         method: api_types::RouteMethod::Get,
         path: "/api/health",
@@ -805,6 +817,18 @@ pub mod routes {
         body: None,
         response: None,
         event: Some("api_types::TranscriptEventEnvelope"),
+    };
+
+    pub const GET_SESSIONS_BY_ID_IMAGES_BY_TOOL_BY_INDEX: RouteDescriptor = RouteDescriptor {
+        method: api_types::RouteMethod::Get,
+        path: "/api/sessions/{id}/images/{tool}/{index}",
+        transport: api_types::RouteTransport::Static,
+        auth: api_types::RouteAuth::Protected,
+        params: Some("api_types::SessionToolResultImageParams"),
+        query: None,
+        body: None,
+        response: None,
+        event: None,
     };
 
     pub const GET_SESSIONS_BY_ID_JSONLPATH: RouteDescriptor = RouteDescriptor {
@@ -1665,6 +1689,17 @@ pub mod routes {
                 .await
         }
 
+        pub async fn get_github_attachments_by_id(
+            &self,
+            params: &api_types::GitHubUserAttachmentParams,
+        ) -> Result<Vec<u8>> {
+            let path = crate::http::render_path(
+                &GET_GITHUB_ATTACHMENTS_BY_ID,
+                &[("id", params.id.to_string())],
+            );
+            self.get_bytes(&GET_GITHUB_ATTACHMENTS_BY_ID, &path).await
+        }
+
         pub async fn get_health(&self) -> Result<api_types::HealthResponse> {
             self.get_json(&GET_HEALTH, GET_HEALTH.path).await
         }
@@ -1943,6 +1978,22 @@ pub mod routes {
                 &[("id", params.id.to_string())],
             );
             self.get_json(&GET_SESSIONS_BY_ID_EVENTS, &path).await
+        }
+
+        pub async fn get_sessions_by_id_images_by_tool_by_index(
+            &self,
+            params: &api_types::SessionToolResultImageParams,
+        ) -> Result<Vec<u8>> {
+            let path = crate::http::render_path(
+                &GET_SESSIONS_BY_ID_IMAGES_BY_TOOL_BY_INDEX,
+                &[
+                    ("id", params.id.to_string()),
+                    ("tool", params.tool.to_string()),
+                    ("index", params.index.to_string()),
+                ],
+            );
+            self.get_bytes(&GET_SESSIONS_BY_ID_IMAGES_BY_TOOL_BY_INDEX, &path)
+                .await
         }
 
         pub async fn get_sessions_by_id_jsonlpath(

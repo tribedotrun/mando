@@ -55,7 +55,7 @@ export function TranscriptPage(): React.ReactElement {
           {search.taskTitle && (
             <div className="mt-0.5 text-caption text-muted-foreground">{search.taskTitle}</div>
           )}
-          <TranscriptTokenUsage events={data?.events} isLoading={isLoading} />
+          <TranscriptTokenUsage events={data?.events} isLoading={isLoading} provider={provider} />
         </div>
         <div className="flex items-center gap-2">
           <Button
@@ -97,7 +97,7 @@ export function TranscriptPage(): React.ReactElement {
         </div>
       </div>
 
-      <TranscriptContent data={data} isLoading={isLoading} error={error} />
+      <TranscriptContent data={data} isLoading={isLoading} error={error} provider={provider} />
     </div>
   );
 }

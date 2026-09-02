@@ -49,6 +49,22 @@ fn session_entry_from_row(
     scout_titles: &std::collections::HashMap<i64, String>,
     cred_labels: &std::collections::HashMap<i64, String>,
 ) -> anyhow::Result<api_types::SessionEntry> {
+    let mut cost_usd = entry.cost_usd;
+    let mut duration_ms = entry.duration_ms;
+    let mut turn_count = entry.turn_count;
+    if entry.provider == api_types::TaskProvider::Claude && entry.resumed != 0 {
+        if let Some(totals) =
+            sessions::transcript_access::load_claude_lifetime_totals(&entry.session_id)
+                .filter(|totals| totals.segment_count > 1)
+        {
+            cost_usd = totals.cost_usd.or(cost_usd);
+            duration_ms = totals
+                .duration_ms
+                .and_then(|duration| i64::try_from(duration).ok())
+                .or(duration_ms);
+            turn_count = totals.num_turns.unwrap_or(turn_count);
+        }
+    }
     let category = entry.group().map(session_category);
     let task_title = entry
         .task_id
@@ -68,9 +84,9 @@ fn session_entry_from_row(
         model: entry.model,
         caller: entry.caller,
         resumed: entry.resumed != 0,
-        cost_usd: entry.cost_usd,
-        duration_ms: entry.duration_ms,
-        turn_count: Some(entry.turn_count),
+        cost_usd,
+        duration_ms,
+        turn_count: Some(turn_count),
         scout_item_id: entry.scout_item_id,
         task_id: entry.task_id.map(|id| id.to_string()),
         worker_name: entry.worker_name,
@@ -359,6 +375,23 @@ pub fn build_sessions_runtime(
                         sessions::transcript_access::load_events_snapshot(&pool, &session_id).await
                     })
                 })
+            },
+            tool_result_image: {
+                let pool = query_pool.clone();
+                Arc::new(
+                    move |session_id: String, tool_use_id: String, image_index| {
+                        let pool = pool.clone();
+                        Box::pin(async move {
+                            sessions::transcript_access::load_tool_result_image(
+                                &pool,
+                                &session_id,
+                                &tool_use_id,
+                                image_index,
+                            )
+                            .await
+                        })
+                    },
+                )
             },
         },
     ))

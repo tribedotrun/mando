@@ -7,7 +7,13 @@ import {
   humanOutcome,
 } from '#renderer/domains/sessions/service/transcriptRenderHelpers';
 
-export function SessionFooter({ event }: { event: ResultEvent }): React.ReactElement {
+export function SessionFooter({
+  event,
+  isSegment,
+}: {
+  event: ResultEvent;
+  isSegment: boolean;
+}): React.ReactElement {
   const { outcome, summary } = event;
   const isError = summary.isError;
   const totalCost =
@@ -25,7 +31,7 @@ export function SessionFooter({ event }: { event: ResultEvent }): React.ReactEle
     >
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
         <span className="font-medium uppercase tracking-wider">
-          {isError ? 'failed' : 'completed'}
+          {isError ? 'failed' : isSegment ? 'segment complete' : 'session complete'}
         </span>
         <span>· {humanOutcome(outcome)}</span>
         <span>· {turns}</span>

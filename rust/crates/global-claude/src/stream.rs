@@ -112,6 +112,17 @@ pub struct StreamCostInfo {
     pub model_usage: Option<serde_json::Value>,
 }
 
+/// Lifetime totals across every completed Claude invocation in one JSONL
+/// file. A resumed Claude session appends a new `init` and a new per-invocation
+/// `result`; those result values are deltas and must be summed.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StreamCostTotals {
+    pub cost_usd: Option<f64>,
+    pub duration_ms: Option<u64>,
+    pub num_turns: Option<i64>,
+    pub segment_count: u32,
+}
+
 /// Read either `permission_denials` or `permissionDenials`, then coerce to a count.
 ///
 /// Filter nulls per-key so a null snake_case value still falls back to a
@@ -148,6 +159,48 @@ pub fn get_stream_cost(stream_path: &Path) -> Option<StreamCostInfo> {
         permission_denials_count: permission_denials_count(&result),
         model_usage,
     })
+}
+
+/// Sum every Claude `type:result` envelope in a stream. Unlike
+/// [`get_stream_cost`], this intentionally crosses resume boundaries.
+pub fn get_stream_cost_totals(stream_path: &Path) -> Option<StreamCostTotals> {
+    let content = match std::fs::read_to_string(stream_path) {
+        Ok(content) => content,
+        Err(error) => {
+            tracing::debug!(
+                path = %stream_path.display(),
+                error = %error,
+                "cannot read Claude stream for lifetime totals",
+            );
+            return None;
+        }
+    };
+    let mut totals = StreamCostTotals {
+        cost_usd: None,
+        duration_ms: None,
+        num_turns: None,
+        segment_count: 0,
+    };
+    for line in content.lines() {
+        let value: serde_json::Value = match serde_json::from_str(line) {
+            Ok(value) => value,
+            Err(_) => continue,
+        };
+        if value.get("type").and_then(|v| v.as_str()) != Some("result") {
+            continue;
+        }
+        totals.segment_count = totals.segment_count.saturating_add(1);
+        if let Some(cost) = value.get("total_cost_usd").and_then(|v| v.as_f64()) {
+            totals.cost_usd = Some(totals.cost_usd.unwrap_or(0.0) + cost);
+        }
+        if let Some(duration) = value.get("duration_ms").and_then(|v| v.as_u64()) {
+            totals.duration_ms = Some(totals.duration_ms.unwrap_or(0).saturating_add(duration));
+        }
+        if let Some(turns) = value.get("num_turns").and_then(|v| v.as_i64()) {
+            totals.num_turns = Some(totals.num_turns.unwrap_or(0).saturating_add(turns));
+        }
+    }
+    (totals.segment_count > 0).then_some(totals)
 }
 
 #[cfg(test)]
@@ -292,6 +345,25 @@ mod tests {
 
         std::fs::remove_file(&path).ok();
         std::fs::remove_dir(&dir).ok();
+    }
+
+    #[test]
+    fn stream_cost_totals_sum_resumed_claude_results() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        let content = [
+            r#"{"type":"system","subtype":"init"}"#,
+            r#"{"type":"result","duration_ms":1403447,"num_turns":143,"total_cost_usd":13.45703975}"#,
+            r#"{"type":"system","subtype":"init"}"#,
+            r#"{"type":"result","duration_ms":18930,"num_turns":3,"total_cost_usd":5.18996975}"#,
+        ]
+        .join("\n");
+        std::fs::write(file.path(), content).unwrap();
+
+        let totals = get_stream_cost_totals(file.path()).unwrap();
+        assert_eq!(totals.duration_ms, Some(1_422_377));
+        assert_eq!(totals.num_turns, Some(146));
+        assert_eq!(totals.segment_count, 2);
+        assert!((totals.cost_usd.unwrap_or_default() - 18.6470095).abs() < f64::EPSILON);
     }
 
     #[test]

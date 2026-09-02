@@ -102,6 +102,7 @@ export const assistantContentBlockSchema = z.union([
 export const assistantEventSchema = z
   .object({
     meta: z.lazy(() => eventMetaSchema),
+    messageId: z.string().nullable(),
     model: z.string().nullable(),
     blocks: z.array(z.lazy(() => assistantContentBlockSchema)),
     usage: z.lazy(() => transcriptUsageInfoSchema).nullable(),
@@ -220,6 +221,14 @@ export const clarifyResponseSchema = z
 export const classifyRuleSchema = z
   .object({ category: z.string(), patterns: z.array(z.string()) })
   .strict();
+export const claudeProgressKindSchema = z.enum([
+  'task_started',
+  'task_notification',
+  'background_tasks_changed',
+  'task_updated',
+  'code_change_published',
+  'vcs_state_changed',
+]);
 export const clientLogBatchRequestSchema = z
   .object({ entries: z.array(z.lazy(() => clientLogEntrySchema)) })
   .strict();
@@ -537,6 +546,7 @@ export const firecrawlScrapeResponseSchema = z
 export const gatewayConfigSchema = z
   .object({ dashboard: z.lazy(() => dashboardConfigSchema) })
   .strict();
+export const gitHubUserAttachmentParamsSchema = z.object({ id: z.string() }).strict();
 export const globInputSchema = z
   .object({ pattern: z.string(), path: z.string().nullable() })
   .strict();
@@ -1096,6 +1106,9 @@ export const sessionSummarySchema = z
     worker_name: z.string().nullable(),
   })
   .strict();
+export const sessionToolResultImageParamsSchema = z
+  .object({ id: z.string(), tool: z.string(), index: z.number() })
+  .strict();
 export const sessionToolUsageResponseSchema = z
   .object({ tools: z.array(z.lazy(() => sessionToolUsageSummarySchema)) })
   .strict();
@@ -1210,6 +1223,12 @@ export const systemApiRetryEventSchema = z
     message: z.string().nullable(),
     retryInMs: z.number().nullable(),
     attempt: z.number().nullable(),
+  })
+  .strict();
+export const systemClaudeProgressEventSchema = z
+  .object({
+    meta: z.lazy(() => eventMetaSchema),
+    progressKind: z.lazy(() => claudeProgressKindSchema),
   })
   .strict();
 export const systemCompactBoundaryEventSchema = z
@@ -1884,6 +1903,12 @@ export const transcriptEventSchema = z.union([
     .strict(),
   z
     .object({
+      kind: z.literal('system_claude_progress'),
+      data: z.lazy(() => systemClaudeProgressEventSchema),
+    })
+    .strict(),
+  z
+    .object({
       kind: z.literal('system_token_usage'),
       data: z.lazy(() => systemTokenUsageEventSchema),
     })
@@ -2322,6 +2347,7 @@ export const paramsSchemas = {
   getArtifactsByIdMediaByIndex: artifactMediaParamsSchema,
   getCredentialsByIdToken: credentialIdParamsSchema,
   getCredentialsCodexByIdResetcredits: credentialIdParamsSchema,
+  getGithubAttachmentsById: gitHubUserAttachmentParamsSchema,
   getImagesByFilename: imageFilenameParamsSchema,
   getScoutItemsById: scoutItemIdParamsSchema,
   getScoutItemsByIdArticle: scoutItemIdParamsSchema,
@@ -2332,6 +2358,7 @@ export const paramsSchemas = {
   getSessionsByIdCost: sessionIdParamsSchema,
   getSessionsByIdEvents: sessionIdParamsSchema,
   getSessionsByIdEventsStream: sessionIdParamsSchema,
+  getSessionsByIdImagesByToolByIndex: sessionToolResultImageParamsSchema,
   getSessionsByIdJsonlpath: sessionIdParamsSchema,
   getSessionsByIdMessages: sessionIdParamsSchema,
   getSessionsByIdStream: sessionIdParamsSchema,

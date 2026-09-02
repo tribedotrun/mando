@@ -182,7 +182,7 @@ pub(crate) async fn gather_worker_contexts(
             work_summary_fresh: artifact_gate.work_summary_fresh,
             has_screenshot: artifact_gate.has_screenshot,
             has_recording: artifact_gate.has_recording,
-            evidence_kinds: artifact_gate.evidence_kinds,
+            has_cannot_reproduce: artifact_gate.has_cannot_reproduce,
         });
     }
 
@@ -480,7 +480,7 @@ pub(crate) async fn build_single_context(
         work_summary_fresh: false,
         has_screenshot: false,
         has_recording: false,
-        evidence_kinds: crate::EvidenceKindGates::default(),
+        has_cannot_reproduce: false,
     };
     let formatted = worker_context::format_context(&ctx);
     Ok((ctx, formatted))

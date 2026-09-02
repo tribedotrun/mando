@@ -238,6 +238,14 @@ fn artifact_routes() -> ApiRouter<AppState> {
         handler = routes_artifacts::get_artifact_media,
         params = api_types::ArtifactMediaParams
     );
+    let router = crate::api_route!(
+        router,
+        GET "/api/github/attachments/{id}",
+        transport = Static,
+        auth = Protected,
+        handler = routes_artifacts::get_github_user_attachment,
+        params = api_types::GitHubUserAttachmentParams
+    );
     crate::api_route!(
         router,
         PUT "/api/artifacts/{id}/media",
