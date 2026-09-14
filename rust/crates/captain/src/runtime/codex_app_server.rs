@@ -209,6 +209,29 @@ mod tests {
     use super::*;
 
     #[test]
+    fn compiled_workflow_routes_codex_defaults_by_runtime_mode() {
+        for (mode, expected_model, expected_tier) in [
+            (settings::WorkflowRuntimeMode::Normal, "gpt-6-astra", None),
+            (settings::WorkflowRuntimeMode::Dev, "gpt-6-astra", None),
+            (
+                settings::WorkflowRuntimeMode::Sandbox,
+                "gpt-5.6-luna",
+                Some("default"),
+            ),
+        ] {
+            let mut config = settings::Config::default();
+            let mut workflow = settings::CaptainWorkflow::compiled_default();
+            let mut scout = settings::ScoutWorkflow::default();
+            settings::apply_workflow_mode_overrides(mode, &mut config, &mut workflow, &mut scout);
+
+            let turn = codex_turn_config(&workflow.agent);
+            assert_eq!(turn.model.as_deref(), Some(expected_model));
+            assert_eq!(turn.reasoning_effort.as_deref(), Some("medium"));
+            assert_eq!(turn.service_tier.as_deref(), expected_tier);
+        }
+    }
+
+    #[test]
     fn danger_full_access_params_match_codex_app_server_protocol() {
         let params = danger_full_access_params();
 
