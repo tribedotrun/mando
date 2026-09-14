@@ -10,11 +10,29 @@ export function SettingsAccounts(): React.ReactElement {
 
   return (
     <div data-testid="settings-credentials" className="space-y-10">
-      <div>
-        <h2 className="text-lg font-semibold text-foreground">Credentials</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Per-account Claude and Codex credentials. Probes plan/usage every 10 minutes.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h2 className="text-lg font-semibold text-foreground">Credentials</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Per-account Claude and Codex credentials. Probes plan/usage every 10 minutes.
+          </p>
+        </div>
+        <label className="flex items-center gap-2 text-sm text-muted-foreground">
+          Sort by
+          <select
+            aria-label="Sort credentials"
+            data-testid="credentials-sort"
+            value={accounts.sort}
+            onChange={(event) => {
+              const value = event.target.value;
+              if (value === 'reset' || value === 'alphabetical') accounts.setSort(value);
+            }}
+            className="rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <option value="reset">7d reset (soonest)</option>
+            <option value="alphabetical">Alphabetical</option>
+          </select>
+        </label>
       </div>
       <ClaudeCredentialsSection
         items={accounts.claude.items}
