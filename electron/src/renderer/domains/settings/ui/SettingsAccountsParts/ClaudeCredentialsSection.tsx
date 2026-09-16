@@ -38,6 +38,10 @@ export function ClaudeCredentialsSection({
           Additional Claude Code credentials for worker load balancing. When no credentials are
           configured, workers use your current Claude Code login.
         </p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Available credentials nearest their weekly reset are used first. Usage refreshes every
+          three hours; use a credential’s refresh button to update it sooner.
+        </p>
       </div>
       <Card className="py-4">
         <CardContent>

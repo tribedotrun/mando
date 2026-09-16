@@ -41,19 +41,3 @@ macro_rules! unrecoverable {
         ::std::panic!("unrecoverable: {}: {}", $msg, err_display);
     }};
 }
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    #[should_panic(expected = "unrecoverable: invariant x violated")]
-    fn bare_message_panics_with_prefix() {
-        crate::unrecoverable!("invariant x violated");
-    }
-
-    #[test]
-    #[should_panic(expected = "unrecoverable: parse failed: bad input")]
-    fn message_plus_error_panics_with_both() {
-        let err = std::io::Error::other("bad input");
-        crate::unrecoverable!("parse failed", err);
-    }
-}

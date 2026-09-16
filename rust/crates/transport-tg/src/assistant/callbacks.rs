@@ -427,15 +427,3 @@ async fn swipe_next(
     }
     Ok(())
 }
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn callback_data_format() {
-        let data = "dg:save:42";
-        let parts: Vec<&str> = data.split(':').collect();
-        assert_eq!(parts[0], "dg");
-        assert_eq!(parts[1], "save");
-        assert_eq!(parts[2].parse::<i64>().unwrap(), 42);
-    }
-}

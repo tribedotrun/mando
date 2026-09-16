@@ -1,5 +1,5 @@
 # Allowed dependency edges between Mando crates.
-# Enforced by structural CI test.
+# Enforced by the Rust architecture scanner.
 # Edges aggregate all Cargo dependency kinds: normal, build, dev, optional, renamed, and target-specific.
 # Any edge not listed here is illegal.
 
@@ -37,7 +37,7 @@ scout = [
     "sessions", "settings",
 ]
 sessions = [
-    "api-types", "global-types", "global-db",
+    "api-types", "global-types",
     "global-infra", "global-claude",
     "sessions-db",
 ]
@@ -66,7 +66,7 @@ transport-ui = []
 # Daemon binary (wires everything: domains + transports + globals)
 mando-gateway = [
     "api-types",
-    "global-types", "global-infra", "global-claude",
+    "global-infra", "global-claude",
     "global-bus", "global-db",
     "captain", "scout", "sessions", "settings",
     "transport-http", "transport-tg", "transport-ui",
@@ -76,5 +76,4 @@ mando-gateway = [
 mando-cli = ["api-types", "gateway-client", "global-types", "global-infra", "global-git"]
 
 # Dev mocks (standalone, zero Mando deps)
-dev-cc-mock = []
 dev-tg-mock = []

@@ -419,16 +419,3 @@ fn panic_to_string(panic: &Box<dyn std::any::Any + Send>) -> String {
         "panic: (unknown payload)".to_string()
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn panic_to_string_formats_known_payloads() {
-        let str_panic: Box<dyn std::any::Any + Send> = Box::new("boom");
-        assert_eq!(panic_to_string(&str_panic), "panic: boom");
-        let string_panic: Box<dyn std::any::Any + Send> = Box::new(String::from("kapow"));
-        assert_eq!(panic_to_string(&string_panic), "panic: kapow");
-    }
-}

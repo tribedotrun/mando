@@ -181,6 +181,8 @@ prompts:
 
     Capture only once the code is final — if code changes after you captured, you recapture, so early captures are waste. Then run the independent proof lanes in parallel rather than one after another: mobile proof, web proof, and the deck prose are separate lanes once the code lands, so fan them out as concurrent subagents, each owning its own device, files, and captions. The one ordering constraint is code before capture.
 
+    Size the evidence to the change. A backend or data fix that clients merely display needs the command output that proves the new state plus one or two product captures per client showing it rendered; it does not need a scroll recording, a contact sheet, or a screenshot per affected row. Keep captures out of your own context unless you need to read one to decide something (`includeImageInContext: false` on screenshot tools, no full-page DOM dumps), and check the finished deck once, not slide by slide.
+
     Register the files (Mando-specific CLI — this exact shape):
     `mando todo evidence after.png demo.webm --caption "..." --caption "..."`
     One `--caption` per file, positional. No `--kind` tag is needed on captures.
@@ -214,6 +216,14 @@ prompts:
     Title: {{ title }}
     Context: {{ context }}
     Task ID: {{ id }}
+    {% if images %}
+
+    ## Attached Images
+
+    Read every attached image below with your image tools before doing the task. These are the original references, including for planned handoffs that skipped clarification.
+
+    {{ images }}
+    {% endif %}
     {% include "_original_request" %}
     {% if plan %}
 
@@ -237,11 +247,13 @@ prompts:
     - Do what the task requires and nothing adjacent: no unrequested refactors, features, or abstractions. The simplest change that fully solves it is the right one.
     - For non-trivial backend changes, check the affected API, database, and cache contracts before implementing. Revisit the design when a concrete problem warrants it, not for a mandatory extra pass.
     - Run the repository's required checks and verify the changed behavior. Add tests for meaningful behavior or regression coverage, not assertions that repeat implementation. Broaden or repeat checks only after new changes, failures, or unresolved concerns. Live product proof in the evidence deck remains required; passing tests do not replace it.
-    - Use available subagent tools for independent, bounded work when it saves time. Keep at most five subagents active, give each separate ownership, and integrate their results before finishing. Do not duplicate their work or delegate tasks that must run sequentially.
+    - Use available subagent tools for independent, bounded work when it saves time. Keep at most five subagents active, give each separate ownership, and integrate their results before finishing. Do not duplicate their work or delegate tasks that must run sequentially. Every subagent you launch runs on Opus 5: pass `model: opus` explicitly on each Agent call and never let a lane inherit or step down to a smaller model.
+    - A subagent's report reaches you only through a message it sends you; a final text reply is not delivery. Tell each subagent to send its report, and treat a lane that finished without one as not yet reported.
     - Skills guide execution within the task's scope and higher-priority instructions. If a skill conflicts with the explicit request or blocks progress, record its exact file, instruction, and concrete conflict in the workpad instead of silently changing scope or skipping required work.
     - Keep the workpad, agent messages, and final response concise and readable. Lead with the result, use concrete technical names, and avoid stock phrases or repeated progress narration. Preserve required PR and evidence formats.
     - Missing local tooling in the worktree (no `node_modules`, missing CLI) is not a blocker — install what the repo needs and continue.
-    - Commit incrementally in small, logical commits.
+    - Commit incrementally in small, logical commits. Before each commit, read the diff for literal escape sequences (`\u2014`, `\n` inside prose) and other text the editor wrote as source instead of characters; they pass lint and cost a review round.
+    - Housekeeping you notice along the way (memory or note reorganisation, unrelated cleanups) is out of scope; record it in the workpad and leave it.
     - Before reporting anything as done, check the claim against something you actually ran or captured this session; if it is not verified yet, say so in the workpad rather than rounding up.
     {% if no_pr %}
 
@@ -253,6 +265,8 @@ prompts:
     ## Finishing
 
     Create or update the PR with `/x-pr` (it owns branch prep and the PR body; captain monitors review and CI state after the handoff). Keep CI green — fix failures even on informational jobs. Update the workpad with the PR link.
+
+    Then save the work summary: run `/x-pr-summary` for the diagram and write-up and register it with `mando todo summary` (Mando-specific CLI). The task cannot be marked done without it, and captain nudges you for it if it is missing.
     {% endif %}
     {% if worker_preamble %}
 

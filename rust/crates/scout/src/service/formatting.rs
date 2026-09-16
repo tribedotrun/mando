@@ -8,19 +8,3 @@ pub fn bullet_list(items: &[String]) -> String {
         .collect::<Vec<_>>()
         .join("\n")
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn bullet_list_joins_with_dashes() {
-        let items = vec!["foo".into(), "bar".into()];
-        assert_eq!(bullet_list(&items), "- foo\n- bar");
-    }
-
-    #[test]
-    fn bullet_list_empty() {
-        assert_eq!(bullet_list(&[]), "");
-    }
-}

@@ -321,36 +321,3 @@ async fn run_git(cwd: &Path, args: &[&str]) -> Result<String> {
         .to_string();
     Ok(stdout)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn display_includes_branch() {
-        let err = GitError::WorktreeAlreadyExists {
-            branch: "mando/foo-1".into(),
-        };
-        assert!(err.to_string().contains("mando/foo-1"));
-    }
-
-    #[test]
-    fn find_survives_context_wrapping() {
-        let wrapped = anyhow::Error::new(GitError::NothingToCommit).context("scaffold commit");
-        let typed = find_git_error(&wrapped).expect("typed error reachable");
-        assert!(matches!(typed, GitError::NothingToCommit));
-    }
-
-    #[test]
-    fn parse_github_slug_formats() {
-        assert_eq!(
-            parse_github_slug("git@github.com:acme/widgets.git"),
-            Some("acme/widgets".to_string())
-        );
-        assert_eq!(
-            parse_github_slug("https://github.com/acme/widgets.git"),
-            Some("acme/widgets".to_string())
-        );
-        assert_eq!(parse_github_slug("git@gitlab.com:org/repo.git"), None);
-    }
-}

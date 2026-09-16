@@ -30,6 +30,10 @@ pub struct CredentialInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional = nullable)]
     pub seven_day: Option<CredentialWindowInfo>,
+    /// Claude's included weekly Fable allowance, when the provider reports it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub seven_day_fable: Option<CredentialWindowInfo>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional = nullable)]
     pub unified_status: Option<CredentialRateLimitStatus>,
@@ -73,6 +77,9 @@ pub type UsageWindowState = CredentialWindowInfo;
 pub struct CredentialUsageSnapshot {
     pub five_hour: CredentialWindowInfo,
     pub seven_day: CredentialWindowInfo,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub seven_day_fable: Option<CredentialWindowInfo>,
     pub unified_status: CredentialRateLimitStatus,
     pub representative_claim: Option<String>,
     pub probed_at: i64,

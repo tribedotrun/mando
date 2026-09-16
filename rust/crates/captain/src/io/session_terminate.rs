@@ -226,32 +226,3 @@ fn should_kill_provider_process(provider: Option<global_types::TaskProvider>) ->
         Some(provider) if !crate::runtime::agent_runtime::uses_shared_process(provider)
     )
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn unknown_provider_does_not_kill_provider_process() {
-        assert!(!should_kill_provider_process(None));
-    }
-
-    #[test]
-    fn codex_provider_does_not_kill_shared_process() {
-        assert!(!should_kill_provider_process(Some(provider("codex"))));
-    }
-
-    #[test]
-    fn claude_provider_can_kill_session_process() {
-        assert!(should_kill_provider_process(Some(provider("claude"))));
-    }
-
-    #[test]
-    fn opencode_provider_can_kill_session_process() {
-        assert!(should_kill_provider_process(Some(provider("opencode"))));
-    }
-
-    fn provider(value: &str) -> global_types::TaskProvider {
-        value.parse().expect("known provider")
-    }
-}

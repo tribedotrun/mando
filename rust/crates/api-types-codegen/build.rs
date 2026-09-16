@@ -24,15 +24,7 @@ fn main() -> Result<()> {
         .collect();
 
     let mut generated = String::from(
-        "// Generated from the typed route registry by build.rs.\n\
-         #[cfg(test)]\n\
-         const GENERATED_ROUTE_ROOTS: &[&str] = &[\n",
-    );
-    for rust_type in &route_roots {
-        generated.push_str(&format!("    {rust_type:?},\n"));
-    }
-    generated.push_str(
-        "];\n\n\
+        "// Generated from the typed route registry by build.rs.\n\n\
          fn register_route_roots(\n\
              cfg: &Config,\n\
              decls: &mut BTreeMap<String, String>,\n\

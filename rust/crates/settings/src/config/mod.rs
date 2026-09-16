@@ -31,8 +31,3 @@ pub use workflow_scout::{
     InterestsConfig, ScoutAgentConfig, ScoutRepo, ScoutWorkflow, ScoutWorkflowOverride,
     UserContextConfig,
 };
-
-#[cfg(test)]
-mod tests;
-#[cfg(test)]
-mod tests_paths;

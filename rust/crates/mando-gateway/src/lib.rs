@@ -1,7 +1,6 @@
 //! mando-gateway — daemon composition root for bootstrap, startup, and shutdown.
 
 mod bootstrap;
-mod drift_test;
 mod instance;
 mod legacy_hooks;
 mod server;

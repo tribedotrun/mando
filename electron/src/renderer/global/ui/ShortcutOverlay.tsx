@@ -10,6 +10,7 @@ interface ShortcutEntry {
 const GENERAL: readonly ShortcutEntry[] = Object.freeze([
   { keys: ['\u2318', 'K'], label: 'Command palette' },
   { keys: ['\u2318', ','], label: 'Settings' },
+  { keys: ['\u2318', '\u21e7', ','], label: 'Credentials' },
   { keys: ['\u2318', 'N'], label: 'New task' },
   { keys: ['?'], label: 'Shortcut reference' },
   { keys: ['Esc'], label: 'Close / deselect' },

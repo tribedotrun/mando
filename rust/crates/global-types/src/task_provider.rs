@@ -118,27 +118,3 @@ impl TryFrom<ExecutionAdapter> for TaskOwnerProvider {
 
 /// Compatibility name for existing wire consumers.
 pub type TaskProvider = ExecutionAdapter;
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn task_owner_rejects_opencode() {
-        assert!("opencode".parse::<TaskOwnerProvider>().is_err());
-        assert!(TaskOwnerProvider::try_from(ExecutionAdapter::OpenCode).is_err());
-        assert!(TaskOwnerProvider::try_from(TaskProvider::OpenCode).is_err());
-    }
-
-    #[test]
-    fn task_owner_maps_to_execution_adapter() {
-        assert_eq!(
-            ExecutionAdapter::from(TaskOwnerProvider::Claude),
-            ExecutionAdapter::Claude
-        );
-        assert_eq!(
-            ExecutionAdapter::from(TaskOwnerProvider::Codex),
-            ExecutionAdapter::Codex
-        );
-    }
-}

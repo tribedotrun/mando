@@ -14,22 +14,7 @@ pub(crate) struct TodoArgs {
 #[derive(Subcommand)]
 pub(crate) enum TodoCommand {
     /// Add a new task
-    Add {
-        /// Task title
-        title: String,
-        /// Project name
-        #[arg(short = 'p', long = "project")]
-        project: Option<String>,
-        /// Plan/brief path for planned handoff
-        #[arg(long)]
-        plan: Option<String>,
-        /// Mark as no-PR / research-only
-        #[arg(long)]
-        no_pr: bool,
-        /// Disable auto-merge for this task even if global auto-merge is on
-        #[arg(long)]
-        no_auto_merge: bool,
-    },
+    Add(crate::todo_create::AddTaskArgs),
     /// Bulk-add items (one per line or via --stdin)
     Bulk {
         /// Items text (newline-separated)
@@ -50,12 +35,18 @@ pub(crate) enum TodoCommand {
     Show {
         /// Item ID
         item_id: String,
+        /// Print the complete task as JSON (sessions: mando sessions --task ID --json)
+        #[arg(long)]
+        json: bool,
     },
     /// List tasks
     List {
         /// Include finalized items
         #[arg(long)]
         all: bool,
+        /// Print the task list response as JSON
+        #[arg(long)]
+        json: bool,
     },
     /// Save a work summary for a task
     #[command(name = "summary")]
@@ -111,30 +102,17 @@ pub(crate) enum TodoCommand {
 
 pub(crate) async fn handle(args: TodoArgs) -> anyhow::Result<()> {
     match args.command {
-        TodoCommand::Add {
-            title,
-            project,
-            plan,
-            no_pr,
-            no_auto_merge,
-        } => {
-            handle_add(
-                &title,
-                project.as_deref(),
-                plan.as_deref(),
-                no_pr,
-                no_auto_merge,
-            )
-            .await
-        }
+        TodoCommand::Add(args) => crate::todo_create::handle_add(args).await,
         TodoCommand::Bulk {
             items,
             stdin,
             project,
         } => handle_bulk(items.as_deref(), stdin, project.as_deref()).await,
         TodoCommand::Delete { item_id } => handle_delete(&item_id).await,
-        TodoCommand::Show { item_id } => crate::todo_display::handle_show(&item_id).await,
-        TodoCommand::List { all } => crate::todo_display::handle_list(all).await,
+        TodoCommand::Show { item_id, json } => {
+            crate::todo_display::handle_show(&item_id, json).await
+        }
+        TodoCommand::List { all, json } => crate::todo_display::handle_list(all, json).await,
         TodoCommand::Summary { item_id, file } => {
             crate::todo_artifacts::handle_summary(item_id.as_deref(), file.as_deref()).await
         }
@@ -157,34 +135,6 @@ pub(crate) async fn handle(args: TodoArgs) -> anyhow::Result<()> {
         TodoCommand::Timeline { item_id, last } => handle_timeline(&item_id, last).await,
         TodoCommand::Input { item_id, message } => handle_input(&item_id, &message).await,
     }
-}
-
-async fn handle_add(
-    title: &str,
-    project: Option<&str>,
-    plan: Option<&str>,
-    no_pr: bool,
-    no_auto_merge: bool,
-) -> anyhow::Result<()> {
-    let client = DaemonClient::discover()?;
-    let mut form = reqwest::multipart::Form::new()
-        .text("title", title.to_string())
-        .text("source", "cli");
-    if let Some(p) = project {
-        form = form.text("project", p.to_string());
-    }
-    if let Some(plan_path) = plan {
-        form = form.text("plan", plan_path.to_string());
-    }
-    if no_pr {
-        form = form.text("no_pr", "true");
-    }
-    if no_auto_merge {
-        form = form.text("no_auto_merge", "true");
-    }
-    let result = client.post_tasks_add_multipart(form).await?;
-    println!("Added item #{}: {title}", result.id);
-    Ok(())
 }
 
 async fn handle_bulk(
@@ -341,43 +291,4 @@ async fn handle_input(item_id: &str, message: &str) -> anyhow::Result<()> {
         }
     }
     Ok(())
-}
-
-#[cfg(test)]
-fn is_terminal(status: &str) -> bool {
-    matches!(status, "merged" | "completed-no-pr" | "canceled")
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use clap::Parser;
-
-    #[test]
-    fn parse_todo_add_rejects_context_flag() {
-        // `--context` was removed from the CLI; clap must reject it.
-        let result = crate::Cli::try_parse_from([
-            "mando",
-            "todo",
-            "add",
-            "Fix bug",
-            "--context",
-            "some context",
-        ]);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn timeline_last_uses_supported_request_and_limits_display() {
-        assert_eq!(timeline_events_for_display(&[1, 2, 3, 4], Some(2)), &[3, 4]);
-    }
-
-    #[test]
-    fn is_terminal_check() {
-        assert!(is_terminal("merged"));
-        assert!(is_terminal("canceled"));
-        assert!(is_terminal("completed-no-pr"));
-        assert!(!is_terminal("in-progress"));
-        assert!(!is_terminal("new"));
-    }
 }

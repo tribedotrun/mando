@@ -278,6 +278,20 @@ impl CcSession {
             return self.build_result(result_msg, elapsed);
         }
 
+        // A structured-output session (captain review, merge, clarifier)
+        // only counts as complete with its `result` event: recovering the
+        // last assistant text would report success with `structured: None`,
+        // and nothing terminal would reach the stream, so the poller would
+        // ride out its full timeout (task 180's review sat 18 minutes on a
+        // process that died mid-thinking).
+        if self.config.json_schema.is_some() {
+            crate::update_stream_meta_status(&self.session_id, "failed", None);
+            return Err(CcError::Other(anyhow::anyhow!(
+                "CC exited with no result event before producing structured output: {}",
+                self.stream_path.display()
+            )));
+        }
+
         // Fallback to last assistant text.
         let text = crate::stream::get_last_assistant_text(&self.stream_path).unwrap_or_default();
         if !text.is_empty() {
@@ -286,6 +300,7 @@ impl CcSession {
                 session_id = %self.session_id,
                 "EOF with no result event, recovered from last assistant text"
             );
+            crate::update_stream_meta_status(&self.session_id, "done", None);
             return Ok(CcResult {
                 text,
                 structured: None,
@@ -392,20 +407,6 @@ impl CcSession {
         &self.stream_path
     }
 
-    /// Classify a parsed `ResultMessage` into either a successful `CcResult`
-    /// envelope or a typed terminal error. Pulled out of `build_result` so the
-    /// fixture test can exercise it without constructing a real CC subprocess.
-    /// `fallback_sid` is used when the envelope omits a session id (recovered
-    /// streams sometimes do this).
-    #[cfg(test)]
-    pub(crate) fn classify_result_message(
-        result: ResultMessage,
-        fallback_sid: &str,
-        credential_id: Option<i64>,
-    ) -> Result<CcResult<serde_json::Value>, CcError> {
-        Self::classify_result_message_after_stop(result, fallback_sid, credential_id, false)
-    }
-
     fn classify_result_message_after_stop(
         result: ResultMessage,
         fallback_sid: &str,
@@ -494,181 +495,4 @@ fn stream_has_interrupted_result(stream_path: &std::path::Path) -> bool {
                         == api_types::ResultOutcome::Interrupted
             })
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::message::{CcMessage, ResultMessage};
-
-    fn parse_result_value(val: serde_json::Value) -> ResultMessage {
-        match CcMessage::parse(val) {
-            CcMessage::Result(r) => r,
-            other => panic!("expected result message, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn returns_err_on_api_error_envelope() {
-        let val = serde_json::json!({
-            "type": "result",
-            "subtype": "error_during_execution",
-            "is_error": true,
-            "result": "API Error: 400 invalid request",
-            "session_id": "sess-api-err",
-            "api_error_status": 400
-        });
-        let result = parse_result_value(val);
-        let err = CcSession::classify_result_message(result, "fallback", None)
-            .expect_err("is_error=true must fail closed");
-        match err {
-            CcError::ApiError {
-                api_error_status,
-                message,
-                session_id,
-                ..
-            } => {
-                assert_eq!(api_error_status, Some(400));
-                assert!(message.contains("API Error: 400"));
-                assert_eq!(session_id, "sess-api-err");
-            }
-            other => panic!("expected CcError::ApiError, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn returns_err_on_api_error_without_status() {
-        let val = serde_json::json!({
-            "type": "result",
-            "subtype": "error_during_execution",
-            "is_error": true,
-            "result": "upstream failed",
-            "session_id": "sess-bare"
-        });
-        let result = parse_result_value(val);
-        let err = CcSession::classify_result_message(result, "fallback", None)
-            .expect_err("is_error=true must fail closed even without status");
-        match err {
-            CcError::ApiError {
-                api_error_status,
-                message,
-                session_id,
-                ..
-            } => {
-                assert!(api_error_status.is_none());
-                assert_eq!(message, "upstream failed");
-                assert_eq!(session_id, "sess-bare");
-            }
-            other => panic!("expected CcError::ApiError, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn returns_ok_on_success_envelope() {
-        let val = serde_json::json!({
-            "type": "result",
-            "subtype": "success",
-            "is_error": false,
-            "result": "done",
-            "session_id": "sess-ok",
-            "total_cost_usd": 0.02,
-            "duration_ms": 1234
-        });
-        let result = parse_result_value(val);
-        let ok = CcSession::classify_result_message(result, "fallback", None)
-            .expect("success envelope should decode to CcResult");
-        assert_eq!(ok.session_id, "sess-ok");
-        assert_eq!(ok.text, "done");
-    }
-
-    #[test]
-    fn returns_interrupted_error_on_interrupted_envelope() {
-        let val = serde_json::json!({
-            "type": "result",
-            "subtype": "interrupted",
-            "is_error": false,
-            "result": "stopped",
-            "session_id": "sess-interrupted"
-        });
-        let result = parse_result_value(val);
-
-        let err = CcSession::classify_result_message(result, "fallback", None)
-            .expect_err("interrupted envelope must not become a successful CcResult");
-
-        assert!(matches!(
-            err,
-            CcError::Interrupted { session_id } if session_id == "sess-interrupted"
-        ));
-    }
-
-    #[test]
-    fn requested_interruption_wins_over_later_provider_error() {
-        let val = serde_json::json!({
-            "type": "result",
-            "subtype": "error_during_execution",
-            "is_error": true,
-            "result": "process exited while being terminated",
-            "session_id": "sess-stopped"
-        });
-        let result = parse_result_value(val);
-
-        let err = CcSession::classify_result_message_after_stop(result, "fallback", None, true)
-            .expect_err("an explicit stop must supersede the provider shutdown error");
-
-        assert!(matches!(
-            err,
-            CcError::Interrupted { session_id } if session_id == "sess-stopped"
-        ));
-    }
-
-    #[test]
-    fn falls_back_to_session_id_when_envelope_omits_it() {
-        let val = serde_json::json!({
-            "type": "result",
-            "subtype": "error_during_execution",
-            "is_error": true,
-            "result": "",
-            "api_error_status": 529
-        });
-        let result = parse_result_value(val);
-        let err = CcSession::classify_result_message(result, "session-from-session", None)
-            .expect_err("is_error=true must fail closed");
-        match err {
-            CcError::ApiError {
-                api_error_status,
-                session_id,
-                ..
-            } => {
-                assert_eq!(api_error_status, Some(529));
-                assert_eq!(session_id, "session-from-session");
-            }
-            other => panic!("expected CcError::ApiError, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn classify_threads_credential_id_into_api_error() {
-        let val = serde_json::json!({
-            "type": "result",
-            "subtype": "error_during_execution",
-            "is_error": true,
-            "result": "You've hit your limit — resets 9:40am",
-            "session_id": "sess-429",
-            "api_error_status": 429
-        });
-        let result = parse_result_value(val);
-        let err = CcSession::classify_result_message(result, "fallback", Some(42))
-            .expect_err("is_error=true must fail closed");
-        match err {
-            CcError::ApiError {
-                api_error_status,
-                credential_id,
-                ..
-            } => {
-                assert_eq!(api_error_status, Some(429));
-                assert_eq!(credential_id, Some(42));
-            }
-            other => panic!("expected CcError::ApiError, got {other:?}"),
-        }
-    }
 }

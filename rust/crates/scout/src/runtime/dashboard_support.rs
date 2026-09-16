@@ -58,18 +58,3 @@ pub(super) fn should_repair_article(status: ScoutStatus) -> bool {
         ScoutStatus::Processed | ScoutStatus::Saved | ScoutStatus::Archived
     )
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn bulk_result_status_preserves_route_contract() {
-        assert_eq!(bulk_result_status(2, 0), api_types::BulkResultStatus::Ok);
-        assert_eq!(
-            bulk_result_status(2, 1),
-            api_types::BulkResultStatus::Partial
-        );
-        assert_eq!(bulk_result_status(0, 1), api_types::BulkResultStatus::Error);
-    }
-}

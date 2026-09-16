@@ -153,6 +153,13 @@ async fn list_credentials(
                     reset_at: window.reset_at,
                     status: api_rate_limit_status(&window.status),
                 }),
+            seven_day_fable: cred
+                .seven_day_fable
+                .map(|window| api_types::CredentialWindowInfo {
+                    utilization: window.utilization,
+                    reset_at: window.reset_at,
+                    status: api_rate_limit_status(&window.status),
+                }),
             unified_status: cred.unified_status.as_deref().map(api_rate_limit_status),
             representative_claim: cred.representative_claim,
             last_probed_at: cred.last_probed_at,
@@ -285,6 +292,13 @@ async fn probe_credential(
                         reset_at: snapshot.seven_day.reset_at,
                         status: api_probe_rate_limit_status(snapshot.seven_day.status),
                     },
+                    seven_day_fable: snapshot.seven_day_fable.map(|window| {
+                        api_types::UsageWindowState {
+                            utilization: window.utilization,
+                            reset_at: window.reset_at,
+                            status: api_probe_rate_limit_status(window.status),
+                        }
+                    }),
                     unified_status: api_probe_rate_limit_status(snapshot.unified_status),
                     representative_claim: snapshot.representative_claim,
                     probed_at: snapshot.probed_at,
@@ -322,7 +336,8 @@ async fn probe_credential(
 /// external caller (e.g. a `claude` invocation in a user terminal).
 ///
 /// Reuses the same `pick_for_worker` selection that captain uses: ordered by
-/// fewest active sessions, then lowest five-hour utilization, then id;
+/// nearest future weekly reset, then fewest active sessions, lowest five-hour
+/// utilization and id;
 /// expired and cooling-down credentials are excluded. Ranking counts every
 /// running session on a credential, so terminal use balances against worker
 /// load out of the one global pool.

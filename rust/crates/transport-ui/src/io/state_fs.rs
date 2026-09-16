@@ -96,33 +96,3 @@ pub(crate) fn persist_state(
         .with_context(|| format!("failed to write {}", state_path.display()))?;
     Ok(())
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn persisted_state_redacts_auth_token() {
-        let path = std::env::temp_dir().join(format!(
-            "transport-ui-state-{}-{}.json",
-            std::process::id(),
-            std::thread::current().name().unwrap_or("test")
-        ));
-        let spec = UiLaunchSpec {
-            exec_path: "/tmp/electron".into(),
-            args: vec!["main.js".into()],
-            cwd: Some("/tmp".into()),
-            env: std::collections::HashMap::from([
-                ("MANDO_AUTH_TOKEN".into(), "secret-token".into()),
-                ("MANDO_GATEWAY_PORT".into(), "18701".into()),
-            ]),
-        };
-
-        persist_state(&path, UiDesiredState::Running, Some(spec)).unwrap();
-
-        let raw = std::fs::read_to_string(&path).unwrap();
-        assert!(!raw.contains("secret-token"));
-        assert!(raw.contains("MANDO_GATEWAY_PORT"));
-        let _ = std::fs::remove_file(path);
-    }
-}

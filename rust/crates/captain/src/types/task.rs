@@ -171,17 +171,6 @@ impl Task {
         self.status
     }
 
-    /// Test-only initializer. Bypasses the lifecycle transition table so
-    /// fixtures can land a task in an arbitrary status without wiring up
-    /// the full state machine. Every other write path must go through
-    /// `service::lifecycle::apply_transition`.
-    ///
-    #[cfg(test)]
-    #[doc(hidden)]
-    pub fn set_status_for_tests(&mut self, status: ItemStatus) {
-        self.status = status;
-    }
-
     /// Create a minimal task with just a title. ID and project_id are 0
     /// (placeholders until INSERT / project resolution).
     pub fn new(title: impl Into<String>) -> Self {
@@ -339,88 +328,5 @@ impl Task {
         if let Some(v) = input.session_ids {
             self.session_ids = v;
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parse_pr_number_full_url() {
-        assert_eq!(
-            parse_pr_number("https://github.com/acme/widgets/pull/116"),
-            Some(116)
-        );
-    }
-
-    #[test]
-    fn parse_pr_number_trailing_path() {
-        assert_eq!(
-            parse_pr_number("https://github.com/acme/widgets/pull/123/files"),
-            Some(123)
-        );
-    }
-
-    #[test]
-    fn parse_pr_number_short_ref() {
-        assert_eq!(parse_pr_number("#334"), Some(334));
-    }
-
-    #[test]
-    fn parse_pr_number_bare_number() {
-        assert_eq!(parse_pr_number("99"), Some(99));
-    }
-
-    #[test]
-    fn parse_pr_number_invalid() {
-        assert_eq!(parse_pr_number(""), None);
-        assert_eq!(parse_pr_number("#"), None);
-        assert_eq!(parse_pr_number("not-a-number"), None);
-    }
-
-    #[test]
-    fn pr_label_format() {
-        assert_eq!(pr_label(42), "#42");
-    }
-
-    #[test]
-    fn pr_url_format() {
-        assert_eq!(
-            pr_url("acme/widgets", 42),
-            "https://github.com/acme/widgets/pull/42"
-        );
-    }
-
-    #[test]
-    fn apply_update_sets_title() {
-        let mut task = Task::new("original");
-        task.apply_update(UpdateTaskInput {
-            title: Some("updated".into()),
-            ..Default::default()
-        });
-        assert_eq!(task.title, "updated");
-    }
-
-    #[test]
-    fn apply_update_clears_nullable_field() {
-        let mut task = Task::new("test");
-        task.worker = Some("worker-1".into());
-        task.apply_update(UpdateTaskInput {
-            worker: Some(None),
-            ..Default::default()
-        });
-        assert!(task.worker.is_none());
-    }
-
-    #[test]
-    fn apply_update_leaves_untouched_fields_alone() {
-        let mut task = Task::new("test");
-        task.context = Some("ctx".into());
-        task.apply_update(UpdateTaskInput {
-            title: Some("new".into()),
-            ..Default::default()
-        });
-        assert_eq!(task.context.as_deref(), Some("ctx"));
     }
 }

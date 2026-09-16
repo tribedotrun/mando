@@ -15,8 +15,5 @@ serde_json.workspace = true
 anyhow.workspace = true
 sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite"] }
 
-[dev-dependencies]
-tokio.workspace = true
-
 [lints]
 workspace = true

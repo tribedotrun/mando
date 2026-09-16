@@ -41,10 +41,15 @@ pub(crate) async fn fetch_task_by_id(
         .ok_or_else(|| anyhow::anyhow!("item #{id_num} not found"))
 }
 
-pub(crate) async fn handle_show(item_id: &str) -> anyhow::Result<()> {
+pub(crate) async fn handle_show(item_id: &str, json: bool) -> anyhow::Result<()> {
     let id_num = parse_id(item_id, "item")?;
     let client = DaemonClient::discover()?;
     let item = fetch_task_by_id(&client, id_num).await?;
+
+    if json {
+        println!("{}", serde_json::to_string(&item)?);
+        return Ok(());
+    }
 
     let status = item_status_label(item.status);
     let title = item.title.as_str();
@@ -112,13 +117,18 @@ pub(crate) async fn handle_show(item_id: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub(crate) async fn handle_list(all: bool) -> anyhow::Result<()> {
+pub(crate) async fn handle_list(all: bool, json: bool) -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
     let resp = client
         .get_tasks(&api_types::TaskListQuery {
             include_archived: all.then_some(true),
         })
         .await?;
+
+    if json {
+        println!("{}", serde_json::to_string(&resp)?);
+        return Ok(());
+    }
 
     println!(
         "{:>4}  {:<15}  {:<20}  {:<14}  {:<8}  TITLE",

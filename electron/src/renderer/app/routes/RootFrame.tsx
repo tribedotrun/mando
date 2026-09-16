@@ -37,6 +37,12 @@ export function RootFrame(): React.ReactElement {
     useUIStore.getState().openCreateTask();
   }, []);
 
+  const openCredentials = useCallback(() => {
+    useUIStore.getState().closePalette();
+    useUIStore.getState().closeShortcuts();
+    void navigate({ to: '/settings/$section', params: { section: 'credentials' } });
+  }, [navigate]);
+
   // The home navigator lets non-React callers (zustand store, keyboard shortcuts
   // routed through the store) bring the user back to / so the inline composer
   // can take focus. The current route's `?project=` is forwarded so users
@@ -66,6 +72,7 @@ export function RootFrame(): React.ReactElement {
       useUIStore.getState().closePalette();
       void navigate({ to: '/settings/$section', params: { section: 'general' } });
     }, [navigate]),
+    onOpenCredentials: openCredentials,
     onToggleShortcuts: useUIStore.getState().toggleShortcuts,
     onGoBack: () => router.history.back(),
     onGoForward: () => router.history.forward(),
@@ -94,11 +101,13 @@ export function RootFrame(): React.ReactElement {
         void navigate({ to: navMap[action] });
       } else if (action === 'act-settings') {
         void navigate({ to: '/settings/$section', params: { section: 'general' } });
+      } else if (action === 'nav-credentials') {
+        openCredentials();
       } else if (action === 'act-create-task') {
         openCreateTask();
       }
     },
-    [navigate, openCreateTask],
+    [navigate, openCreateTask, openCredentials],
   );
 
   return (

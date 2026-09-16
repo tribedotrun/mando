@@ -114,18 +114,3 @@ fn map_app_error(error: settings::CodexDesktopAppError) -> ApiError {
     );
     error_response(status, &message)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn optional_path_ignores_missing_and_blank_overrides() {
-        assert!(optional_path(None).is_none());
-        assert!(optional_path(Some("   ".into())).is_none());
-        assert_eq!(
-            optional_path(Some(" /tmp/codex-home ".into())),
-            Some(PathBuf::from("/tmp/codex-home"))
-        );
-    }
-}

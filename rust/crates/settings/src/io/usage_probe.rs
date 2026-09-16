@@ -1,26 +1,10 @@
-//! Proactive credential usage probe.
+//! Subscription usage snapshots shared across Claude and Codex credentials.
 //!
-//! Sends a 1-token Haiku request to `/v1/messages` with the OAuth access
-//! token and reads the `anthropic-ratelimit-unified-*` response headers.
-//! Both 200 and 429 responses carry the same headers, so either tells us
-//! the current utilization for the five-hour and seven-day windows.
-//!
-//! Cost per probe: ~1 Haiku output token (~$0.00004). Counts against the
-//! quota but negligibly.
-//!
-//! Approach mirrors the pattern used by claude-monitor (github.com/rjwalters
-//! /claude-monitor), which abandoned the undocumented `/api/oauth/usage`
-//! endpoint after it started rejecting OAuth tokens; the ping is the only
-//! working way to read live utilization today.
-//!
-//! Verified working end-to-end against real OAuth tokens; see the plan doc
-//! for the reference `curl` invocation.
+//! Claude probes use an isolated no-tools Fable print session so setup tokens
+//! expose the model-specific weekly window as well as aggregate usage.
 use serde::Serialize;
 
-/// Model used for the 1-token ping. Dated ID pins us against alias drift.
-const PROBE_MODEL: &str = "claude-haiku-4-5-20251001";
-
-/// Anthropic rate-limit status as reported on `anthropic-ratelimit-unified-*-status`.
+/// Subscription rate-limit status reported by the credential provider.
 /// Canonical type lives in `global-types::rate_limit`; this re-export keeps
 /// the public surface of `settings` stable.
 pub use global_types::RateLimitStatus;
@@ -29,19 +13,21 @@ pub use global_types::RateLimitStatus;
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WindowState {
-    /// Fraction of the window consumed, in `[0.0, 1.0]`.
+    /// Fraction of the window consumed; may exceed 1 when overage is allowed.
     pub utilization: f64,
     /// Unix seconds when the window resets.
     pub reset_at: i64,
     pub status: RateLimitStatus,
 }
 
-/// Snapshot of one credential's usage across both windows.
+/// Snapshot of one credential's aggregate and model-specific usage.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UsageSnapshot {
     pub five_hour: WindowState,
     pub seven_day: WindowState,
+    /// Fable weekly allowance, when the provider exposes it.
+    pub seven_day_fable: Option<WindowState>,
     pub unified_status: RateLimitStatus,
     /// Which window the server treats as binding right now
     /// (e.g. `five_hour`, `seven_day`, `seven_day_opus`).
@@ -57,15 +43,19 @@ pub enum ProbeError {
     /// expired and stop probing until the user re-authenticates.
     #[error("unauthorized (token expired or invalid)")]
     Unauthorized,
+    /// A rejected print session may include its reset without utilization.
+    #[error("credential is rate limited")]
+    RateLimited {
+        resets_at: Option<u64>,
+        claim: Option<String>,
+    },
     /// Unexpected HTTP status other than 200, 401, or 429.
     #[error("unexpected HTTP status {0}")]
     Http(u16),
     /// Network-level failure (connect/timeout/DNS).
     #[error("network error: {0}")]
     Network(String),
-    /// Response was 200/429 but required rate-limit headers were missing.
-    /// Indicates the API response shape has changed or the account tier
-    /// does not return unified headers — not a transient blip.
+    /// The provider response is missing required subscription usage fields.
     #[error("parse error: {0}")]
     Parse(String),
     /// The probe succeeded but persisting the snapshot to the DB failed.
@@ -76,184 +66,39 @@ pub enum ProbeError {
     Persist(String),
 }
 
-/// POST a 1-token ping to the Anthropic API with `access_token` and return a
-/// parsed snapshot.
-///
-/// Both 200 and 429 carry the rate-limit headers; 401 means the OAuth token
-/// is dead. 5xx and network errors are transient; caller should retry on the
-/// next poll tick.
+/// Read all subscription windows through a minimal Claude Code session.
+#[tracing::instrument(skip_all)]
 pub async fn probe(access_token: &str) -> Result<UsageSnapshot, ProbeError> {
-    let client = global_net::http::usage_probe_client();
-
-    let body = serde_json::json!({
-        "model": PROBE_MODEL,
-        "max_tokens": 1,
-        "messages": [{"role": "user", "content": "x"}],
-    });
-
-    let response = client
-        .post("https://api.anthropic.com/v1/messages")
-        .bearer_auth(access_token)
-        .header("anthropic-version", "2023-06-01")
-        .header("anthropic-beta", "oauth-2025-04-20")
-        .json(&body)
-        .send()
+    let snapshot = global_claude::probe_quota(access_token)
         .await
-        .map_err(|e| ProbeError::Network(e.to_string()))?;
-
-    let status = response.status();
-    if status == reqwest::StatusCode::UNAUTHORIZED {
-        return Err(ProbeError::Unauthorized);
-    }
-    if status != reqwest::StatusCode::OK && status != reqwest::StatusCode::TOO_MANY_REQUESTS {
-        return Err(ProbeError::Http(status.as_u16()));
-    }
-
-    parse_headers(response.headers())
-}
-
-fn parse_headers(headers: &reqwest::header::HeaderMap) -> Result<UsageSnapshot, ProbeError> {
-    let probed_at = time::OffsetDateTime::now_utc().unix_timestamp();
-    let five_hour = parse_window(headers, "5h")?;
-    let seven_day = parse_window(headers, "7d")?;
-    let unified_status = required_status(headers, "anthropic-ratelimit-unified-status")?;
-    let representative_claim = headers
-        .get("anthropic-ratelimit-unified-representative-claim")
-        .and_then(|v| v.to_str().ok())
-        .map(|s| s.to_string());
-
+        .map_err(|error| match error {
+            global_claude::QuotaProbeError::Unauthorized => ProbeError::Unauthorized,
+            global_claude::QuotaProbeError::RateLimited { resets_at, claim } => {
+                ProbeError::RateLimited { resets_at, claim }
+            }
+            global_claude::QuotaProbeError::Parse(message) => ProbeError::Parse(message),
+            other => ProbeError::Network(other.to_string()),
+        })?;
+    let claim = snapshot.representative_claim.as_deref();
+    let window = |value: global_claude::QuotaWindow, name: &str| WindowState {
+        utilization: value.utilization,
+        reset_at: value.resets_at,
+        status: if claim == Some(name) {
+            snapshot.status.clone()
+        } else if value.utilization >= 1.0 {
+            RateLimitStatus::Rejected
+        } else {
+            RateLimitStatus::Allowed
+        },
+    };
     Ok(UsageSnapshot {
-        five_hour,
-        seven_day,
-        unified_status,
-        representative_claim,
-        probed_at,
+        five_hour: window(snapshot.five_hour, "five_hour"),
+        seven_day: window(snapshot.seven_day, "seven_day"),
+        seven_day_fable: snapshot
+            .seven_day_fable
+            .map(|value| window(value, "seven_day_overage_included")),
+        unified_status: snapshot.status,
+        representative_claim: snapshot.representative_claim,
+        probed_at: time::OffsetDateTime::now_utc().unix_timestamp(),
     })
-}
-
-fn parse_window(
-    headers: &reqwest::header::HeaderMap,
-    suffix: &str,
-) -> Result<WindowState, ProbeError> {
-    let util_hdr = format!("anthropic-ratelimit-unified-{suffix}-utilization");
-    let reset_hdr = format!("anthropic-ratelimit-unified-{suffix}-reset");
-    let status_hdr = format!("anthropic-ratelimit-unified-{suffix}-status");
-
-    let utilization = required_f64(headers, &util_hdr)?;
-    let reset_at = required_i64(headers, &reset_hdr)?;
-    let status = required_status(headers, &status_hdr)?;
-    Ok(WindowState {
-        utilization,
-        reset_at,
-        status,
-    })
-}
-
-fn required_f64(headers: &reqwest::header::HeaderMap, name: &str) -> Result<f64, ProbeError> {
-    headers
-        .get(name)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.parse::<f64>().ok())
-        .ok_or_else(|| ProbeError::Parse(format!("missing or invalid header: {name}")))
-}
-
-fn required_i64(headers: &reqwest::header::HeaderMap, name: &str) -> Result<i64, ProbeError> {
-    headers
-        .get(name)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.parse::<i64>().ok())
-        .ok_or_else(|| ProbeError::Parse(format!("missing or invalid header: {name}")))
-}
-
-fn required_status(
-    headers: &reqwest::header::HeaderMap,
-    name: &str,
-) -> Result<RateLimitStatus, ProbeError> {
-    let s = headers
-        .get(name)
-        .and_then(|v| v.to_str().ok())
-        .ok_or_else(|| ProbeError::Parse(format!("missing or invalid header: {name}")))?;
-    let status = RateLimitStatus::parse(s);
-    if status.is_known() {
-        Ok(status)
-    } else {
-        Err(ProbeError::Parse(format!(
-            "unexpected rate-limit status {s:?} for header {name}"
-        )))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use reqwest::header::{HeaderMap, HeaderValue};
-
-    fn canned_headers() -> HeaderMap {
-        let mut h = HeaderMap::new();
-        h.insert(
-            "anthropic-ratelimit-unified-5h-utilization",
-            HeaderValue::from_static("0.47"),
-        );
-        h.insert(
-            "anthropic-ratelimit-unified-5h-reset",
-            HeaderValue::from_static("1776420000"),
-        );
-        h.insert(
-            "anthropic-ratelimit-unified-5h-status",
-            HeaderValue::from_static("allowed_warning"),
-        );
-        h.insert(
-            "anthropic-ratelimit-unified-7d-utilization",
-            HeaderValue::from_static("0.08"),
-        );
-        h.insert(
-            "anthropic-ratelimit-unified-7d-reset",
-            HeaderValue::from_static("1776970800"),
-        );
-        h.insert(
-            "anthropic-ratelimit-unified-7d-status",
-            HeaderValue::from_static("allowed"),
-        );
-        h.insert(
-            "anthropic-ratelimit-unified-status",
-            HeaderValue::from_static("allowed_warning"),
-        );
-        h.insert(
-            "anthropic-ratelimit-unified-representative-claim",
-            HeaderValue::from_static("five_hour"),
-        );
-        h
-    }
-
-    #[test]
-    fn parse_headers_happy_path() {
-        let snap = parse_headers(&canned_headers()).expect("parse");
-        assert!((snap.five_hour.utilization - 0.47).abs() < 1e-9);
-        assert_eq!(snap.five_hour.reset_at, 1_776_420_000);
-        assert_eq!(snap.five_hour.status, RateLimitStatus::AllowedWarning);
-        assert!((snap.seven_day.utilization - 0.08).abs() < 1e-9);
-        assert_eq!(snap.seven_day.status, RateLimitStatus::Allowed);
-        assert_eq!(snap.unified_status, RateLimitStatus::AllowedWarning);
-        assert_eq!(snap.representative_claim.as_deref(), Some("five_hour"));
-    }
-
-    #[test]
-    fn parse_headers_missing_field_errs() {
-        let mut h = canned_headers();
-        h.remove("anthropic-ratelimit-unified-5h-reset");
-        let err = parse_headers(&h).unwrap_err();
-        assert!(matches!(err, ProbeError::Parse(_)));
-    }
-
-    #[test]
-    fn ratelimit_status_roundtrip() {
-        for s in [
-            RateLimitStatus::Allowed,
-            RateLimitStatus::AllowedWarning,
-            RateLimitStatus::Rejected,
-        ] {
-            assert_eq!(RateLimitStatus::parse(s.as_str()), s);
-        }
-        assert!(!RateLimitStatus::parse("bogus").is_known());
-    }
 }

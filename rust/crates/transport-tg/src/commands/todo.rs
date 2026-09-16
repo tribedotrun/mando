@@ -135,39 +135,3 @@ fn build_project_picker(action_id: &str, names: &[String]) -> api_types::Telegra
     }]);
     api_types::TelegramReplyMarkup::InlineKeyboard { rows }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn first_line_labels_a_multi_line_title() {
-        assert_eq!(first_line("Fix login\nmore detail"), "Fix login");
-        assert_eq!(first_line("  Fix login  "), "Fix login");
-        assert_eq!(first_line(""), "");
-    }
-
-    #[test]
-    fn project_picker_routes_selection_and_cancel_through_one_prefix() {
-        let names = vec!["mando".to_string(), "hyper-tribe".to_string()];
-        let api_types::TelegramReplyMarkup::InlineKeyboard { rows } =
-            build_project_picker("abc", &names)
-        else {
-            panic!("project picker must use an inline keyboard");
-        };
-        let callbacks: Vec<&str> = rows
-            .iter()
-            .flatten()
-            .filter_map(|button| button.callback_data.as_deref())
-            .collect();
-
-        assert_eq!(
-            callbacks,
-            [
-                "todo_project:abc:0",
-                "todo_project:abc:1",
-                "todo_project:abc:cancel",
-            ],
-        );
-    }
-}

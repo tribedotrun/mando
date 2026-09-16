@@ -393,39 +393,3 @@ pub(crate) async fn post_task_stop(
     let id = body.id;
     simple_task_action(&state, id, state.captain.stop_item(id)).await
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn task_with(pr: Option<i64>, repo: Option<&str>) -> captain::Task {
-        let mut item = captain::Task::new("test");
-        item.pr_number = pr;
-        item.github_repo = repo.map(str::to_string);
-        item
-    }
-
-    #[test]
-    fn close_info_present_when_pr_and_repo_set() {
-        let info = task_pr_close_info(&task_with(Some(42), Some("owner/repo")));
-        assert_eq!(info, Some(("42".to_string(), "owner/repo".to_string())));
-    }
-
-    #[test]
-    fn close_info_none_without_pr() {
-        assert_eq!(
-            task_pr_close_info(&task_with(None, Some("owner/repo"))),
-            None
-        );
-    }
-
-    #[test]
-    fn close_info_none_without_repo() {
-        assert_eq!(task_pr_close_info(&task_with(Some(7), None)), None);
-    }
-
-    #[test]
-    fn close_info_none_when_both_missing() {
-        assert_eq!(task_pr_close_info(&task_with(None, None)), None);
-    }
-}

@@ -14,7 +14,8 @@ export function SettingsAccounts(): React.ReactElement {
         <div>
           <h2 className="text-lg font-semibold text-foreground">Credentials</h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            Per-account Claude and Codex credentials. Probes plan/usage every 10 minutes.
+            Per-account Claude and Codex credentials. Claude usage refreshes every three hours;
+            Codex usage refreshes every 10 minutes. You can refresh either manually.
           </p>
         </div>
         <label className="flex items-center gap-2 text-sm text-muted-foreground">

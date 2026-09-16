@@ -36,12 +36,6 @@ const USER_AGENT: &str = "mando/1.0";
 const BROWSER_USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) \
      AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
 
-/// User-Agent for Anthropic credential usage probe. The OAuth-beta-gated
-/// `/v1/messages` endpoint rejects any UA it does not recognize as Claude
-/// Code, so this must look like the real CLI. The exact version does not
-/// need to match the user's installed binary.
-const PROBE_USER_AGENT: &str = "claude-code/2.1.0";
-
 /// User-Agent for Codex credential usage probe and OAuth refresh. Matches the
 /// Codex CLI identity so `chatgpt.com/backend-api/wham/usage` accepts the call.
 const CODEX_PROBE_USER_AGENT: &str = "codex-cli/0.0.0";
@@ -53,7 +47,6 @@ static HTML_FETCH_NO_REDIRECT: OnceLock<Arc<reqwest::Client>> = OnceLock::new();
 static FIRECRAWL: OnceLock<Arc<reqwest::Client>> = OnceLock::new();
 static TELEGRAPH: OnceLock<Arc<reqwest::Client>> = OnceLock::new();
 static YT_DLP: OnceLock<Arc<reqwest::Client>> = OnceLock::new();
-static USAGE_PROBE: OnceLock<Arc<reqwest::Client>> = OnceLock::new();
 static CODEX_PROBE: OnceLock<Arc<reqwest::Client>> = OnceLock::new();
 
 fn cached<F>(cell: &'static OnceLock<Arc<reqwest::Client>>, build: F) -> Arc<reqwest::Client>
@@ -149,18 +142,6 @@ pub fn yt_dlp_client() -> Arc<reqwest::Client> {
             .timeout(Duration::from_secs(120))
             .build()
             .unwrap_or_else(|e| global_infra::unrecoverable!("yt_dlp_client build failed", e))
-    })
-}
-
-/// Client for the credential rate-limit usage probe. Requires a
-/// Claude-Code-looking UA to pass the OAuth-beta gate. 15s timeout.
-pub fn usage_probe_client() -> Arc<reqwest::Client> {
-    cached(&USAGE_PROBE, || {
-        reqwest::Client::builder()
-            .user_agent(PROBE_USER_AGENT)
-            .timeout(Duration::from_secs(15))
-            .build()
-            .unwrap_or_else(|e| global_infra::unrecoverable!("usage_probe_client build failed", e))
     })
 }
 

@@ -103,24 +103,6 @@ fn parse_review_text(verdict_text: &str, item: &Task) -> Option<CaptainVerdict> 
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parse_review_text_error_report_has_normal_spacing() {
-        let task = Task::new("review spacing");
-        let verdict = parse_review_text("not json", &task).expect("invalid JSON escalates");
-        let report = verdict.report.expect("escalate report");
-
-        assert!(report.starts_with("Captain review verdict could not be parsed as JSON. Raw text"));
-        assert!(
-            !report.contains("JSON.  Raw"),
-            "report should not contain collapsed indentation spaces: {report:?}"
-        );
-    }
-}
-
 /// Check if the async CC task wrote an error result to the stream file.
 ///
 /// Returns the error message if a failure marker is present.

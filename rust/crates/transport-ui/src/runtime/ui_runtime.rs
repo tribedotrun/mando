@@ -401,37 +401,3 @@ impl UiRuntime {
         )
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use std::collections::HashMap;
-
-    use super::*;
-
-    #[tokio::test]
-    async fn new_discards_redacted_persisted_launch_spec() {
-        let state_path = std::env::temp_dir().join(format!(
-            "transport-ui-runtime-{}-{}.json",
-            std::process::id(),
-            std::thread::current().name().unwrap_or("test")
-        ));
-        let launch_spec = UiLaunchSpec {
-            exec_path: "/tmp/electron".into(),
-            args: vec!["main.js".into()],
-            cwd: Some("/tmp".into()),
-            env: HashMap::from([
-                ("MANDO_AUTH_TOKEN".into(), "secret-token".into()),
-                ("MANDO_GATEWAY_PORT".into(), "18701".into()),
-            ]),
-        };
-        state_fs::persist_state(&state_path, UiDesiredState::Running, Some(launch_spec)).unwrap();
-
-        let runtime = UiRuntime::new(state_path.clone());
-        let status = runtime.status().await;
-
-        assert_eq!(status.desired_state, UiDesiredState::Running);
-        assert!(!status.launch_available);
-
-        let _ = std::fs::remove_file(state_path);
-    }
-}

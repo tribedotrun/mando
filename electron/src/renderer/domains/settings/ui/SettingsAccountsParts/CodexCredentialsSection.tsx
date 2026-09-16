@@ -34,6 +34,9 @@ export function CodexCredentialsSection(props: CodexCredentialsSectionProps): Re
           <code className="mx-1">~/.codex</code> home, though an account added here that is also
           your personal login shares that account&apos;s rate limits).
         </p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Available accounts nearest their weekly reset are used first.
+        </p>
       </div>
       <CodexDesktopAppBanner />
       <Card className="py-4">

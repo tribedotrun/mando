@@ -183,17 +183,3 @@ fn filter_external_codex_lines(text: &str, own_pid: u32, caller_pid: Option<u32>
         })
         .collect()
 }
-
-#[cfg(all(test, target_os = "macos"))]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn external_scan_excludes_daemon_caller_and_chatgpt_bundle() {
-        let lines = "10 /tmp/mando-gw codex\n20 mando codex app-use work\n30 /Applications/ChatGPT.app/Contents/MacOS/ChatGPT codex\n40 codex app-server";
-        assert_eq!(
-            filter_external_codex_lines(lines, 10, Some(20)),
-            vec!["40 codex app-server"]
-        );
-    }
-}

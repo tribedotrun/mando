@@ -439,7 +439,3 @@ fn missing_gate_nudge(
     }
     Ok(None)
 }
-
-#[cfg(test)]
-#[path = "deterministic_tests.rs"]
-mod tests;

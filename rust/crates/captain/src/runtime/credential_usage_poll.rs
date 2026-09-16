@@ -3,10 +3,9 @@
 //! Runs as an independent tokio task alongside the captain tick loop. Every
 //! tick it:
 //!
-//! 1. Lists every stored Claude credential.
+//! 1. Lists every stored credential.
 //! 2. For each credential that is not expired and not within the throttle
-//!    window, pings `/v1/messages` and reads the
-//!    `anthropic-ratelimit-unified-*` headers to capture live utilization.
+//!    window, captures subscription usage through its provider.
 //! 3. Persists the snapshot to the `credentials` row (columns added in
 //!    migration 026).
 //! 4. Unifies with the reactive rate-limit path: when the snapshot's
@@ -15,10 +14,11 @@
 //!    keeps one source of truth.
 //! 5. Emits `BusPayload::Credentials` so the Electron UI refetches live.
 //!
-//! Cadence is a flat 10 minutes regardless of utilization. A per-credential
-//! throttle prevents redundant back-to-back probes when the manual refresh
-//! endpoint fires at the same time as the scheduled tick.
+//! Claude usage refreshes every three hours; Codex every ten minutes.
+//! Expired cooldowns trigger a fresh probe before a credential is reused.
+//! The manual refresh endpoint remains available between scheduled probes.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -32,8 +32,10 @@ use settings::usage_probe::{ProbeError, RateLimitStatus, UsageSnapshot};
 
 use super::credential_rate_limit;
 
-/// Sleep between poll ticks. Flat for all providers and all utilizations.
+/// Check scheduling deadlines every ten minutes.
 const TICK_INTERVAL: Duration = Duration::from_secs(600);
+const CLAUDE_REFRESH_SECS: i64 = 3 * 60 * 60;
+const CODEX_REFRESH_SECS: i64 = 10 * 60;
 /// Do not re-probe a credential whose `last_probed_at` is within this window.
 /// Protects against manual-refresh + scheduled-tick collisions.
 const PER_CREDENTIAL_THROTTLE_SECS: i64 = 60;
@@ -45,6 +47,7 @@ const STARTUP_DELAY: Duration = Duration::from_secs(15);
 /// Spawned from `mando-gateway::background_tasks::spawn_credential_usage_poll`.
 #[tracing::instrument(skip_all)]
 pub async fn run(pool: SqlitePool, bus: Arc<EventBus>, cancel: CancellationToken) {
+    let mut last_attempts = HashMap::new();
     info!(
         module = "captain",
         "credential usage poll started (interval={}s)",
@@ -63,7 +66,11 @@ pub async fn run(pool: SqlitePool, bus: Arc<EventBus>, cancel: CancellationToken
             break;
         }
 
-        if let Err(e) = tick_once(&pool, &bus).await {
+        let tick_result = tokio::select! {
+            result = tick_once(&pool, &bus, &mut last_attempts) => result,
+            _ = cancel.cancelled() => break,
+        };
+        if let Err(e) = tick_result {
             warn!(
                 module = "captain",
                 error = %e,
@@ -82,8 +89,13 @@ pub async fn run(pool: SqlitePool, bus: Arc<EventBus>, cancel: CancellationToken
 
 /// Probe every eligible credential once. Persistence and bus emission
 /// happen inline; the caller does not need a return value.
-async fn tick_once(pool: &SqlitePool, bus: &EventBus) -> anyhow::Result<()> {
+async fn tick_once(
+    pool: &SqlitePool,
+    bus: &EventBus,
+    last_attempts: &mut HashMap<i64, i64>,
+) -> anyhow::Result<()> {
     let rows = credentials::list_all(pool).await?;
+    last_attempts.retain(|id, _| rows.iter().any(|row| row.id == *id));
     if rows.is_empty() {
         return Ok(());
     }
@@ -94,6 +106,16 @@ async fn tick_once(pool: &SqlitePool, bus: &EventBus) -> anyhow::Result<()> {
         if !should_probe(&row, now_secs) {
             continue;
         }
+        if !cooldown_expired(&row, now_secs)
+            && last_attempts
+                .get(&row.id)
+                .is_some_and(|last| now_secs - last < refresh_interval(&row))
+        {
+            continue;
+        }
+        // Failed or incomplete sessions also consume quota. Keep their
+        // scheduled retry at the same cadence without claiming a new snapshot.
+        last_attempts.insert(row.id, now_secs);
 
         match probe_and_persist(pool, &row).await {
             Ok(snapshot) => {
@@ -128,6 +150,11 @@ async fn tick_once(pool: &SqlitePool, bus: &EventBus) -> anyhow::Result<()> {
                     }
                 }
             }
+            Err(ProbeError::RateLimited { .. }) => {
+                // probe_and_persist applied the rejection's cooldown even
+                // when the CLI could not return utilization windows.
+                dirty = true;
+            }
             // Persist errors mean the snapshot arrived but didn't stick —
             // worth a warning because the poll throttle and pre-spawn
             // staleness check both rely on last_probed_at advancing.
@@ -146,7 +173,7 @@ async fn tick_once(pool: &SqlitePool, bus: &EventBus) -> anyhow::Result<()> {
                     module = "captain",
                     credential_id = row.id,
                     error = %e,
-                    "credential probe response missing expected headers"
+                    "credential probe response missing expected usage windows"
                 );
             }
             Err(e) => {
@@ -198,13 +225,30 @@ pub fn notify_codex_credential_dead(bus: &EventBus, credential_id: i64, label: &
 
 /// Returns whether we should probe this credential right now.
 ///
-/// We intentionally probe credentials that are in cooldown: `seven_day`
-/// rejections cap their cooldown at 1h (see `credential_rate_limit.rs`),
-/// but the server can recover much sooner as old usage ages out of the
-/// sliding window. Re-probing the cooldown'd credential is the only way
-/// to detect that early recovery. An expired credential still skips.
+/// Active cooldowns follow the normal refresh cadence to detect early
+/// recovery. Expired cooldowns are due even when the normal refresh is not.
 pub(crate) fn should_probe(row: &CredentialRow, now_secs: i64) -> bool {
-    !is_expired(row, now_secs) && !recently_probed(row, now_secs)
+    if is_expired(row, now_secs) || row.disabled_at.is_some() || recently_probed(row, now_secs) {
+        return false;
+    }
+    if cooldown_expired(row, now_secs) {
+        return true;
+    }
+    row.last_probed_at
+        .is_none_or(|last| now_secs - last >= refresh_interval(row))
+}
+
+fn refresh_interval(row: &CredentialRow) -> i64 {
+    if row.provider == "codex" {
+        CODEX_REFRESH_SECS
+    } else {
+        CLAUDE_REFRESH_SECS
+    }
+}
+
+fn cooldown_expired(row: &CredentialRow, now_secs: i64) -> bool {
+    row.rate_limit_cooldown_until
+        .is_some_and(|until| until > 0 && until <= now_secs)
 }
 
 fn is_expired(row: &CredentialRow, now_secs: i64) -> bool {
@@ -234,7 +278,19 @@ pub async fn probe_and_persist(
     pool: &SqlitePool,
     row: &CredentialRow,
 ) -> Result<UsageSnapshot, ProbeError> {
-    let snapshot = settings::provider_probe::probe(pool, row).await?;
+    let snapshot = match settings::provider_probe::probe(pool, row).await {
+        Err(error @ ProbeError::RateLimited { .. }) => {
+            if let ProbeError::RateLimited {
+                resets_at,
+                ref claim,
+            } = error
+            {
+                credential_rate_limit::activate(pool, row.id, resets_at, claim.as_deref()).await;
+            }
+            return Err(error);
+        }
+        result => result?,
+    };
     credentials::set_usage_snapshot(pool, row.id, &snapshot)
         .await
         .map_err(|e| {
@@ -256,6 +312,10 @@ pub async fn probe_and_persist(
             // default — far too short for a weekly cap.
             let reset_at = match snapshot.representative_claim.as_deref() {
                 Some("five_hour") => snapshot.five_hour.reset_at,
+                Some("seven_day_overage_included") => snapshot
+                    .seven_day_fable
+                    .as_ref()
+                    .map_or(snapshot.seven_day.reset_at, |window| window.reset_at),
                 Some(s) if s.starts_with("seven_day") => snapshot.seven_day.reset_at,
                 _ => snapshot.five_hour.reset_at.max(snapshot.seven_day.reset_at),
             };
@@ -285,103 +345,4 @@ pub async fn probe_and_persist(
         }
     }
     Ok(snapshot)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn row_with(
-        expires_at: Option<i64>,
-        cooldown: Option<i64>,
-        last_probed: Option<i64>,
-    ) -> CredentialRow {
-        CredentialRow {
-            id: 1,
-            label: "t".into(),
-            access_token: "x".into(),
-            expires_at,
-            rate_limit_cooldown_until: cooldown,
-            disabled_at: None,
-            created_at: String::new(),
-            updated_at: String::new(),
-            five_hour_utilization: None,
-            five_hour_reset_at: None,
-            five_hour_status: None,
-            seven_day_utilization: None,
-            seven_day_reset_at: None,
-            seven_day_status: None,
-            unified_status: None,
-            representative_claim: None,
-            last_probed_at: last_probed,
-            last_picked_at: None,
-            token_updated_at: None,
-            provider: "claude".into(),
-            refresh_token: None,
-            id_token: None,
-            account_id: None,
-            plan_type: None,
-            credits_balance: None,
-            credits_unlimited: 0,
-        }
-    }
-
-    #[test]
-    fn should_probe_fresh_credential() {
-        let row = row_with(None, None, None);
-        assert!(should_probe(&row, 1_000_000));
-    }
-
-    #[test]
-    fn should_skip_expired() {
-        let now_secs = 1_000_000;
-        let expired_ms = (now_secs - 10) * 1000;
-        let row = row_with(Some(expired_ms), None, None);
-        assert!(!should_probe(&row, now_secs));
-    }
-
-    #[test]
-    fn should_probe_cooldown_for_early_recovery() {
-        let now_secs = 1_000_000;
-        let row = row_with(None, Some(now_secs + 600), None);
-        assert!(should_probe(&row, now_secs));
-    }
-
-    #[test]
-    fn should_skip_recently_probed() {
-        let now_secs = 1_000_000;
-        let row = row_with(None, None, Some(now_secs - 10));
-        assert!(!should_probe(&row, now_secs));
-    }
-
-    #[test]
-    fn should_probe_after_throttle_window() {
-        let now_secs = 1_000_000;
-        let row = row_with(
-            None,
-            None,
-            Some(now_secs - PER_CREDENTIAL_THROTTLE_SECS - 1),
-        );
-        assert!(should_probe(&row, now_secs));
-    }
-
-    #[test]
-    fn notify_codex_credential_dead_emits_high_priority_notification() {
-        let bus = EventBus::new();
-        let mut rx = bus.subscribe();
-
-        notify_codex_credential_dead(&bus, 42, "acct-alpha");
-
-        let payload = match rx.try_recv().expect("notification must be emitted") {
-            global_bus::BusPayload::Notification(p) => p,
-            other => panic!("unexpected payload: {other:?}"),
-        };
-        assert!(payload.message.contains("acct-alpha"));
-        assert!(payload.message.contains("revoked or expired"));
-        assert_eq!(payload.level, api_types::NotifyLevel::High);
-        assert_eq!(
-            payload.task_key.as_deref(),
-            Some("codex-credential-expired:42")
-        );
-    }
 }

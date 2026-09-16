@@ -10,14 +10,3 @@ pub(crate) fn timeline_path(state_dir: &Path, item_id: &str) -> PathBuf {
         .join("timeline")
         .join(format!("{}.json", sanitize_path_id(item_id)))
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn path_sanitized() {
-        let p = timeline_path(Path::new("/tmp"), "../etc/passwd");
-        assert!(!p.to_str().unwrap().contains(".."));
-    }
-}

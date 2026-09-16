@@ -9,6 +9,7 @@ mod oneshot;
 mod pricing;
 mod process;
 mod protocol;
+mod quota_probe;
 mod session;
 mod stream;
 mod stream_symptoms;
@@ -35,6 +36,7 @@ pub use message::{
 pub use oneshot::CcOneShot;
 pub use pricing::{fallback_rate, rate_for_model, ModelRate};
 pub use process::spawn_detached;
+pub use quota_probe::{probe_quota, QuotaProbeError, QuotaSnapshot, QuotaWindow};
 pub use session::CcSession;
 pub use stream::{
     get_last_assistant_text, get_stream_cost, get_stream_cost_totals, get_stream_file_size,

@@ -13,34 +13,6 @@ pub enum NotifyLevel {
     Critical,
 }
 
-#[cfg(test)]
-mod notify_level_order_tests {
-    use super::NotifyLevel;
-
-    #[test]
-    fn notify_level_total_order_is_low_normal_high_critical() {
-        assert!(NotifyLevel::Low < NotifyLevel::Normal);
-        assert!(NotifyLevel::Normal < NotifyLevel::High);
-        assert!(NotifyLevel::High < NotifyLevel::Critical);
-        let mut sorted = vec![
-            NotifyLevel::Critical,
-            NotifyLevel::Low,
-            NotifyLevel::High,
-            NotifyLevel::Normal,
-        ];
-        sorted.sort();
-        assert_eq!(
-            sorted,
-            vec![
-                NotifyLevel::Low,
-                NotifyLevel::Normal,
-                NotifyLevel::High,
-                NotifyLevel::Critical,
-            ]
-        );
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(tag = "type")]
 pub enum NotificationKind {

@@ -42,8 +42,7 @@ export default [
       'no-empty': ['error', { allowEmptyCatch: false }],
       // PR #883 invariant #3: ban console.* in production code. The
       // preload IPC validator and renderer/main logger self-referential
-      // failure paths are allowed via per-file overrides in
-      // tests-overrides.mjs.
+      // failure paths are allowed via the per-file overrides below.
       'no-console': 'error',
     },
   },

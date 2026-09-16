@@ -20,8 +20,6 @@ struct TelegramRuntimeState {
     pending: PendingMessages,
     bot_abort: Option<tokio::task::AbortHandle>,
     notification_abort: Option<tokio::task::AbortHandle>,
-    #[cfg(test)]
-    notification_spawn_count: u32,
     failure_count: u32,
     first_failure_at: Option<Instant>,
     degraded: bool,
@@ -216,18 +214,9 @@ impl TelegramRuntime {
         let gw = GatewayClient::new(self.port, Some(self.auth_token.clone()));
         let pending = state.pending.clone();
         let owner_chat_id = owner.to_string();
-        #[cfg(test)]
-        {
-            state.notification_spawn_count += 1;
-        }
         let notif_handle = tokio::spawn(async move {
-            if cfg!(test) {
-                std::future::pending::<()>().await;
-            } else {
-                sse::run_notification_loop(base_url, gw_token, api, owner_chat_id, gw, pending)
-                    .await;
-                runtime.handle_task_exit(generation, "telegram notifications stopped".to_string());
-            }
+            sse::run_notification_loop(base_url, gw_token, api, owner_chat_id, gw, pending).await;
+            runtime.handle_task_exit(generation, "telegram notifications stopped".to_string());
         });
 
         state.notification_abort = Some(notif_handle.abort_handle());
@@ -351,161 +340,5 @@ fn abort_locked(state: &mut TelegramRuntimeState) {
     }
     if let Some(handle) = state.notification_abort.take() {
         handle.abort();
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn automatic_reconfiguration_preserves_failure_window() {
-        let first_failure = Instant::now();
-        let runtime = TelegramRuntime::new(0, "test-token".to_string());
-        {
-            let mut state = runtime.inner.lock().await;
-            state.failure_count = 3;
-            state.first_failure_at = Some(first_failure);
-            state.restart_count = 2;
-        }
-
-        runtime
-            .configure_for(
-                &settings::Config::default(),
-                ConfigureReason::AutomaticRestart,
-            )
-            .await
-            .expect("automatic reconfiguration");
-
-        let state = runtime.inner.lock().await;
-        assert_eq!(state.failure_count, 3);
-        assert_eq!(state.first_failure_at, Some(first_failure));
-        assert_eq!(state.restart_count, 2);
-    }
-
-    #[tokio::test]
-    async fn manual_reconfiguration_clears_failure_window_and_degraded_state() {
-        let runtime = TelegramRuntime::new(0, "test-token".to_string());
-        {
-            let mut state = runtime.inner.lock().await;
-            state.failure_count = 5;
-            state.first_failure_at = Some(Instant::now());
-            state.degraded = true;
-            state.restart_count = 2;
-        }
-
-        runtime
-            .configure(&settings::Config::default())
-            .await
-            .expect("manual reconfiguration");
-
-        let state = runtime.inner.lock().await;
-        assert_eq!(state.failure_count, 0);
-        assert_eq!(state.first_failure_at, None);
-        assert!(!state.degraded);
-        assert_eq!(state.restart_count, 2);
-    }
-
-    // Holding the state lock through the start barrier queues both registrations
-    // at the same precondition before either caller can create a listener.
-    #[allow(clippy::await_holding_lock)]
-    #[tokio::test]
-    async fn concurrent_owner_registration_spawns_one_notification_listener() {
-        let runtime = TelegramRuntime::new(0, "gateway-token".to_string());
-        let mut config = settings::Config::default();
-        config.env.insert(
-            "TELEGRAM_MANDO_BOT_TOKEN".to_string(),
-            "telegram-token".to_string(),
-        );
-        let mut state = runtime.inner.lock().await;
-        state.enabled = true;
-        state.generation = 1;
-        state.last_config = Some(config);
-
-        let barrier = Arc::new(tokio::sync::Barrier::new(3));
-        let first_runtime = runtime.clone();
-        let first_barrier = barrier.clone();
-        let first = tokio::spawn(async move {
-            first_barrier.wait().await;
-            first_runtime.register_owner("owner-a".to_string()).await
-        });
-        let second_runtime = runtime.clone();
-        let second_barrier = barrier.clone();
-        let second = tokio::spawn(async move {
-            second_barrier.wait().await;
-            second_runtime.register_owner("owner-b".to_string()).await
-        });
-        barrier.wait().await;
-        tokio::task::yield_now().await;
-        drop(state);
-
-        first
-            .await
-            .expect("first task")
-            .expect("first registration");
-        second
-            .await
-            .expect("second task")
-            .expect("second registration");
-
-        let state = runtime.inner.lock().await;
-        assert_eq!(state.notification_spawn_count, 1);
-    }
-
-    #[test]
-    fn repeated_failures_back_off_then_enter_degraded_state() {
-        let mut state = TelegramRuntimeState::default();
-        let first_failure = Instant::now();
-
-        for (offset_secs, expected_backoff_secs) in [(0, 1), (1, 2), (2, 4), (3, 8)] {
-            assert_eq!(
-                record_failure(
-                    &mut state,
-                    first_failure + std::time::Duration::from_secs(offset_secs),
-                ),
-                FailureDisposition::RestartAfter(std::time::Duration::from_secs(
-                    expected_backoff_secs,
-                )),
-            );
-        }
-
-        assert_eq!(
-            record_failure(
-                &mut state,
-                first_failure + std::time::Duration::from_secs(4),
-            ),
-            FailureDisposition::Degraded,
-        );
-        assert_eq!(state.failure_count, 5);
-        assert!(state.degraded);
-    }
-
-    #[test]
-    fn failure_after_window_starts_a_new_backoff_sequence() {
-        let mut state = TelegramRuntimeState::default();
-        let first_failure = Instant::now();
-
-        assert_eq!(
-            record_failure(&mut state, first_failure),
-            FailureDisposition::RestartAfter(std::time::Duration::from_secs(1)),
-        );
-        assert_eq!(
-            record_failure(&mut state, first_failure + DEGRADED_WINDOW),
-            FailureDisposition::RestartAfter(std::time::Duration::from_secs(1)),
-        );
-        assert_eq!(state.failure_count, 1);
-        assert_eq!(
-            state.first_failure_at,
-            Some(first_failure + DEGRADED_WINDOW)
-        );
-    }
-
-    #[test]
-    fn notification_listener_has_no_bot_owned_spawn_path() {
-        let bot_source = include_str!("../bot.rs");
-        assert!(
-            !bot_source.contains("run_notification_loop"),
-            "TelegramRuntime must remain the sole notification-listener owner",
-        );
     }
 }

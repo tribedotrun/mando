@@ -35,7 +35,7 @@ function WindowRow({
   const pct = utilizationToBarValue(w.utilization);
   return (
     <div className="flex items-center gap-3" data-testid={`credential-window-${label}`}>
-      <span className="w-8 shrink-0 text-xs font-medium text-muted-foreground">{label}</span>
+      <span className="w-16 shrink-0 text-xs font-medium text-muted-foreground">{label}</span>
       <Progress value={pct} className={cn('h-1.5 flex-1', STATUS_BAR_CLASSES[w.status])} />
       <span className="w-10 shrink-0 text-right text-xs tabular-nums text-foreground">
         {formatUtilizationPct(w.utilization)}
@@ -48,7 +48,7 @@ function WindowRow({
 }
 
 /**
- * Per-credential 5h / 7d utilization bars with manual refresh.
+ * Per-credential usage windows, including Fable's weekly limit, with manual refresh.
  *
  * Data comes from the proactive usage probe (see
  * `rust/crates/settings/src/io/usage_probe.rs`). The poll runs in the background;
@@ -59,9 +59,9 @@ export function CredentialUsage({ cred }: { cred: CredentialInfo }): React.React
   if (cred.isExpired) {
     return <CredentialExpiredNotice cred={cred} />;
   }
-  const { fiveHour, sevenDay, lastProbedAt, costSinceProbeUsd } = cred;
+  const { fiveHour, sevenDay, sevenDayFable, lastProbedAt, costSinceProbeUsd } = cred;
   const sinceProbe = formatSinceProbe(lastProbedAt);
-  if (fiveHour == null && sevenDay == null) {
+  if (fiveHour == null && sevenDay == null && sevenDayFable == null) {
     return (
       <div className="mt-2 flex items-center justify-between text-xs text-muted-foreground">
         <span>Usage not yet probed.</span>
@@ -82,6 +82,9 @@ export function CredentialUsage({ cred }: { cred: CredentialInfo }): React.React
     <div className="mt-2 space-y-1.5" data-testid="credential-usage">
       {fiveHour ? <WindowRow label="5h" window={fiveHour} /> : null}
       {sevenDay ? <WindowRow label="7d" window={sevenDay} /> : null}
+      {cred.provider === 'claude' && sevenDayFable ? (
+        <WindowRow label="Fable 7d" window={sevenDayFable} />
+      ) : null}
       {cred.provider === 'codex' ? (
         <CodexResetCredits credentialId={cred.id} enabled={!cred.isExpired} />
       ) : null}

@@ -398,6 +398,10 @@ export const credentialInfoSchema = z
       .lazy(() => credentialWindowInfoSchema)
       .nullable()
       .optional(),
+    sevenDayFable: z
+      .lazy(() => credentialWindowInfoSchema)
+      .nullable()
+      .optional(),
     unifiedStatus: z
       .lazy(() => credentialRateLimitStatusSchema)
       .nullable()
@@ -430,6 +434,10 @@ export const credentialUsageSnapshotSchema = z
   .object({
     fiveHour: z.lazy(() => credentialWindowInfoSchema),
     sevenDay: z.lazy(() => credentialWindowInfoSchema),
+    sevenDayFable: z
+      .lazy(() => credentialWindowInfoSchema)
+      .nullable()
+      .optional(),
     unifiedStatus: z.lazy(() => credentialRateLimitStatusSchema),
     representativeClaim: z.string().nullable(),
     probedAt: z.number(),
