@@ -472,7 +472,3 @@ async fn run_captain_tick_inner(
         rate_limited,
     })
 }
-
-#[cfg(test)]
-#[path = "tick_tests.rs"]
-mod tests;

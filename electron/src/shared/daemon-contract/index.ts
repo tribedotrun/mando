@@ -294,6 +294,10 @@ export type CredentialInfo = {
   isDisabled: boolean;
   fiveHour?: CredentialWindowInfo | null;
   sevenDay?: CredentialWindowInfo | null;
+  /**
+   * Claude's included weekly Fable allowance, when the provider reports it.
+   */
+  sevenDayFable?: CredentialWindowInfo | null;
   unifiedStatus?: CredentialRateLimitStatus | null;
   representativeClaim?: string | null;
   lastProbedAt?: number | null;
@@ -313,6 +317,7 @@ export type CredentialTokenResponse = { token: string };
 export type CredentialUsageSnapshot = {
   fiveHour: CredentialWindowInfo;
   sevenDay: CredentialWindowInfo;
+  sevenDayFable?: CredentialWindowInfo | null;
   unifiedStatus: CredentialRateLimitStatus;
   representativeClaim: string | null;
   probedAt: number;

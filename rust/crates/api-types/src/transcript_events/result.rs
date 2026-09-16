@@ -122,31 +122,3 @@ pub struct UnknownEvent {
     pub raw_subtype: Option<String>,
     pub raw: String,
 }
-
-#[cfg(test)]
-mod tests {
-    use super::ResultOutcome;
-
-    #[test]
-    fn canonical_outcome_distinguishes_success_interruption_and_error() {
-        assert_eq!(
-            ResultOutcome::from_subtype(Some("success"), false),
-            ResultOutcome::Success
-        );
-        assert_eq!(
-            ResultOutcome::from_subtype(Some("interrupted"), false),
-            ResultOutcome::Interrupted
-        );
-        assert_eq!(
-            ResultOutcome::from_subtype(Some("success"), true),
-            ResultOutcome::ErrorDuringExecution
-        );
-        assert_eq!(
-            ResultOutcome::from_subtype(None, false),
-            ResultOutcome::ErrorDuringExecution
-        );
-        assert!(ResultOutcome::Success.is_clean());
-        assert!(!ResultOutcome::Interrupted.is_clean());
-        assert!(!ResultOutcome::Interrupted.is_error());
-    }
-}

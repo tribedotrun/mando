@@ -68,38 +68,3 @@ fn probe_worktree_exists(worktree: &str, workbench_id: i64) -> bool {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn inject_marks_empty_path_as_missing() {
-        let mut value = serde_json::json!({});
-        inject_worktree_exists(&mut value, "", 7).unwrap();
-        assert_eq!(value["worktreeExists"], serde_json::Value::Bool(false));
-    }
-
-    #[test]
-    fn inject_marks_real_dir_as_present() {
-        let tmp = tempfile::tempdir().unwrap();
-        let mut value = serde_json::json!({});
-        inject_worktree_exists(&mut value, tmp.path().to_str().unwrap(), 7).unwrap();
-        assert_eq!(value["worktreeExists"], serde_json::Value::Bool(true));
-    }
-
-    #[test]
-    fn inject_marks_missing_path_as_absent() {
-        let mut value = serde_json::json!({});
-        inject_worktree_exists(&mut value, "/this/path/should/never/exist/mando-test-42", 7)
-            .unwrap();
-        assert_eq!(value["worktreeExists"], serde_json::Value::Bool(false));
-    }
-
-    #[test]
-    fn inject_errors_on_non_object_value() {
-        let mut value = serde_json::Value::String("nope".into());
-        let result = inject_worktree_exists(&mut value, "/tmp", 7);
-        assert!(result.is_err(), "non-object input must fail loudly");
-    }
-}

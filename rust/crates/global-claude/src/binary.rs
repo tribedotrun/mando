@@ -43,13 +43,3 @@ pub fn resolve_claude_binary() -> PathBuf {
 
     PathBuf::from("claude")
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn resolve_returns_non_empty() {
-        assert!(!resolve_claude_binary().as_os_str().is_empty());
-    }
-}

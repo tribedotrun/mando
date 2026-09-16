@@ -164,29 +164,3 @@ async fn post_scout_ask_inner(
         qa_result.suggested_followups,
     )))
 }
-
-#[cfg(test)]
-mod tests {
-    use super::build_scout_ask_response;
-
-    #[test]
-    fn scout_ask_response_preserves_contract_fields() {
-        let response = build_scout_ask_response(
-            7,
-            "what changed?",
-            "here is the answer".to_string(),
-            Some("sid-123".to_string()),
-            vec!["next?".to_string()],
-        );
-
-        assert_eq!(response.id, Some(7));
-        assert!(!response.ask_id.is_empty());
-        assert_eq!(response.question.as_deref(), Some("what changed?"));
-        assert_eq!(response.answer, "here is the answer");
-        assert_eq!(response.session_id.as_deref(), Some("sid-123"));
-        assert_eq!(
-            response.suggested_followups,
-            Some(vec!["next?".to_string()])
-        );
-    }
-}

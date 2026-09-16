@@ -8,6 +8,26 @@ use anyhow::{Context, Result};
 use crate::config::CcConfig;
 use crate::error::CcError;
 
+/// Subagents inherit the parent model by default. Mando pins them to Opus 5
+/// with the 1M context window so a worker never fans out onto a cheaper,
+/// 200k-window model (task 180 landed a screenshot-heavy web lane on Sonnet
+/// 4.6 and compacted twice). `config.env` is applied afterwards and may
+/// override it per call.
+const SUBAGENT_MODEL: &str = "claude-opus-5[1m]";
+
+/// Environment shared by attached and detached Claude Code spawns.
+fn apply_process_env(cmd: &mut tokio::process::Command, config: &CcConfig) {
+    cmd.env("CLAUDE_CODE_EXIT_AFTER_STOP_DELAY", "5000");
+    cmd.env("CLAUDE_CODE_SUBAGENT_MODEL", SUBAGENT_MODEL);
+    cmd.env_remove("CLAUDECODE");
+    if config.caller.starts_with("scout-") {
+        cmd.env("DISABLE_LANG_GUARD", "1");
+    }
+    for (k, v) in &config.env {
+        cmd.env(k, v);
+    }
+}
+
 /// Spawn a Claude Code process attached to the parent (stdin/stdout piped for
 /// interactive streaming). Returns the child handle, its `Pid`, the stream
 /// path, and the already-open stream file used to tee stdout. Stderr goes
@@ -77,15 +97,7 @@ pub(crate) async fn spawn_process(
 
     // Stdout stays piped; the caller reads it and tees each line into stream_file.
 
-    // Environment.
-    cmd.env("CLAUDE_CODE_EXIT_AFTER_STOP_DELAY", "5000");
-    cmd.env_remove("CLAUDECODE");
-    if config.caller.starts_with("scout-") {
-        cmd.env("DISABLE_LANG_GUARD", "1");
-    }
-    for (k, v) in &config.env {
-        cmd.env(k, v);
-    }
+    apply_process_env(&mut cmd, config);
 
     // Working directory.
     if !config.cwd.as_os_str().is_empty() {
@@ -188,15 +200,7 @@ pub async fn spawn_detached(
         .stdout(std::process::Stdio::from(stream_file))
         .stderr(std::process::Stdio::from(stderr_file));
 
-    // Environment.
-    cmd.env("CLAUDE_CODE_EXIT_AFTER_STOP_DELAY", "5000");
-    cmd.env_remove("CLAUDECODE");
-    if config.caller.starts_with("scout-") {
-        cmd.env("DISABLE_LANG_GUARD", "1");
-    }
-    for (k, v) in &config.env {
-        cmd.env(k, v);
-    }
+    apply_process_env(&mut cmd, config);
 
     if !config.cwd.as_os_str().is_empty() {
         cmd.current_dir(&config.cwd);

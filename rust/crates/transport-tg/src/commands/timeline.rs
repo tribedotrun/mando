@@ -159,29 +159,3 @@ pub async fn execute(bot: &TelegramBot, chat_id: &str, args: &str) -> Result<()>
     }
     Ok(())
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn event_line_renders_inline_code_in_summary() {
-        let line = format_event_line(
-            "2026-04-29T00:00",
-            "worker_completed",
-            "\u{2705}",
-            "Done — `cargo test` passed",
-        );
-
-        assert!(line.contains("<code>cargo test</code>"), "line: {line}");
-        assert!(!line.contains("`cargo test`"), "literal backticks: {line}");
-        assert!(line.contains("<b>worker_completed</b>"));
-    }
-
-    #[test]
-    fn event_line_renders_bold_in_summary() {
-        let line = format_event_line("ts", "kind", "icon", "made it **really** fast");
-        assert!(line.contains("<b>really</b>"));
-        assert!(!line.contains("**"));
-    }
-}

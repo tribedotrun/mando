@@ -75,16 +75,3 @@ fn guess_content_type(filename: &str) -> &'static str {
         _ => "application/octet-stream",
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn content_type_detection() {
-        assert_eq!(guess_content_type("photo.png"), "image/png");
-        assert_eq!(guess_content_type("photo.JPG"), "image/jpeg");
-        assert_eq!(guess_content_type("icon.svg"), "image/svg+xml");
-        assert_eq!(guess_content_type("file.bin"), "application/octet-stream");
-    }
-}

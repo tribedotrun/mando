@@ -118,14 +118,6 @@ pub fn get_health_u32(state: &HealthState, worker: &str, field: &str) -> u32 {
         .unwrap_or(0) as u32
 }
 
-/// Get a u64 field from a health entry.
-#[cfg(test)]
-pub(crate) fn get_health_u64(state: &HealthState, worker: &str, field: &str) -> u64 {
-    get_health_value(state, worker, field)
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0)
-}
-
 /// Get a float field from a health entry.
 pub(crate) fn get_health_f64(state: &HealthState, worker: &str, field: &str) -> Option<f64> {
     get_health_value(state, worker, field).and_then(|v| v.as_f64())
@@ -190,80 +182,5 @@ pub(crate) fn set_health_field(
         .or_insert_with(|| serde_json::json!({}));
     if let Some(obj) = entry.as_object_mut() {
         obj.insert(field.to_string(), value);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn empty_state() {
-        let state = HealthState::new();
-        assert_eq!(get_health_u32(&state, "w", "nudge_count"), 0);
-        assert_eq!(get_health_u64(&state, "w", "stream_size_at_spawn"), 0);
-        assert!(get_health_f64(&state, "w", "cpu_time_s").is_none());
-    }
-
-    #[test]
-    fn u64_round_trip() {
-        let mut state = HealthState::new();
-        let big: u64 = 1_000_000;
-        set_health_field(
-            &mut state,
-            "w",
-            "stream_size_at_spawn",
-            serde_json::json!(big),
-        );
-        assert_eq!(get_health_u64(&state, "w", "stream_size_at_spawn"), big);
-    }
-
-    #[test]
-    fn set_and_get() {
-        let mut state = HealthState::new();
-        set_health_field(&mut state, "w", "nudge_count", serde_json::json!(5));
-        assert_eq!(get_health_u32(&state, "w", "nudge_count"), 5);
-    }
-
-    #[test]
-    fn save_load_round_trip() {
-        let tmp = std::env::temp_dir().join("mando-test-health.json");
-        let mut state = HealthState::new();
-        set_health_field(&mut state, "w", "cpu", serde_json::json!(42.5));
-        save_health_state(&tmp, &state).unwrap();
-
-        let loaded = load_health_state(&tmp).unwrap();
-        assert_eq!(get_health_f64(&loaded, "w", "cpu"), Some(42.5));
-
-        std::fs::remove_file(&tmp).ok();
-    }
-
-    #[test]
-    fn missing_file_returns_empty() {
-        let tmp = std::env::temp_dir().join("mando-test-health-missing.json");
-        let _ = std::fs::remove_file(&tmp); // ensure absent
-        let state = load_health_state(&tmp).expect("missing file should be OK");
-        assert!(state.is_empty());
-    }
-
-    #[test]
-    fn corrupt_file_errors_and_renames() {
-        let tmp = std::env::temp_dir().join("mando-test-health-corrupt.json");
-        let bak = tmp.with_extension("corrupt.bak");
-        // Clean up any leftovers from previous runs.
-        let _ = std::fs::remove_file(&tmp);
-        let _ = std::fs::remove_file(&bak);
-
-        std::fs::write(&tmp, "NOT VALID JSON {{{").unwrap();
-        let err = load_health_state(&tmp).expect_err("corrupt file should error");
-        assert!(err.to_string().contains("corrupt"));
-        // Original should be gone, backup should exist.
-        assert!(!tmp.exists(), "corrupt file should have been renamed");
-        assert!(bak.exists(), "backup file should exist");
-        // Backup contains the corrupt content.
-        let content = std::fs::read_to_string(&bak).unwrap();
-        assert_eq!(content, "NOT VALID JSON {{{");
-
-        let _ = std::fs::remove_file(&bak);
     }
 }

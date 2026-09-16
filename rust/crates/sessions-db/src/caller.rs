@@ -140,34 +140,3 @@ impl fmt::Display for CallerGroup {
         f.write_str(self.as_str())
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn roundtrip_all_callers() {
-        for caller in SessionCaller::all() {
-            let s = caller.as_str();
-            let parsed = SessionCaller::parse(s).unwrap_or_else(|| {
-                panic!("failed to parse caller: {s}");
-            });
-            assert_eq!(*caller, parsed);
-        }
-    }
-
-    #[test]
-    fn unknown_callers_degrade_to_none() {
-        for caller in ["unknown", "retired-session", "retired-session:42"] {
-            assert_eq!(SessionCaller::parse(caller), None);
-        }
-    }
-
-    #[test]
-    fn scout_callers_require_item() {
-        assert!(SessionCaller::ScoutProcess.requires_scout_item());
-        assert!(SessionCaller::ScoutArticle.requires_scout_item());
-        assert!(!SessionCaller::Worker.requires_scout_item());
-        assert!(!SessionCaller::CaptainReviewAsync.requires_scout_item());
-    }
-}

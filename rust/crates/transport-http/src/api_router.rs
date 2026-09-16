@@ -27,6 +27,15 @@ where
         }
     }
 
+    /// Override Axum's default 2 MiB extractor limit for this route group.
+    pub(crate) fn with_body_limit(self, bytes: usize) -> Self {
+        Self {
+            inner: self
+                .inner
+                .layer(axum::extract::DefaultBodyLimit::max(bytes)),
+        }
+    }
+
     pub fn into_router(self) -> Router<S> {
         self.inner
     }

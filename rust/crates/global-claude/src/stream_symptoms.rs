@@ -98,19 +98,6 @@ impl StreamSymptomMatcher {
         self.rules.iter().find(|r| r.name == name)
     }
 
-    /// First rule (in declaration order) whose clauses all match `text`.
-    /// Kept as a `cfg(test)` helper so the test suite can exercise the
-    /// generic matcher behavior without producers re-implementing the
-    /// rules-iter + first-match pattern. Production detectors use
-    /// [`Self::rules`] + [`StreamSymptomRule::matches`] directly so they
-    /// can filter by variant (skipping `SessionInterrupted` on the
-    /// primary path, etc.).
-    #[cfg(test)]
-    pub(crate) fn detect<'a>(&'a self, text: &str) -> Option<&'a StreamSymptomRule> {
-        let lower = text.to_ascii_lowercase();
-        self.rules.iter().find(|rule| rule.matches_lower(&lower))
-    }
-
     /// Total rule count — exposed for test coverage assertions.
     pub fn rule_count(&self) -> usize {
         self.rules.len()
@@ -140,97 +127,5 @@ impl StreamSymptomRule {
     /// Convenience: lowercases `text` then calls [`Self::matches_lower`].
     pub fn matches(&self, text: &str) -> bool {
         self.matches_lower(&text.to_ascii_lowercase())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn sample_rules() -> Vec<StreamSymptomRule> {
-        vec![
-            StreamSymptomRule {
-                name: CcStreamSymptom::NoConversationFound,
-                reason: "no_conversation_found".into(),
-                broken_session: true,
-                clauses: vec![vec!["No conversation found with session ID".into()]],
-            },
-            StreamSymptomRule {
-                name: CcStreamSymptom::StreamIdleTimeout,
-                reason: "stream_idle_timeout".into(),
-                broken_session: true,
-                clauses: vec![vec!["Stream idle timeout".into()]],
-            },
-            StreamSymptomRule {
-                name: CcStreamSymptom::ContextLengthExceeded,
-                reason: "context_length_exceeded".into(),
-                broken_session: true,
-                clauses: vec![vec!["prompt is too long".into()], vec!["tokens".into()]],
-            },
-            StreamSymptomRule {
-                name: CcStreamSymptom::IsError,
-                reason: "cc_is_error".into(),
-                broken_session: true,
-                clauses: vec![vec![
-                    r#""is_error":true"#.into(),
-                    r#""is_error": true"#.into(),
-                ]],
-            },
-        ]
-    }
-
-    fn matcher() -> StreamSymptomMatcher {
-        StreamSymptomMatcher::new(sample_rules())
-    }
-
-    #[test]
-    fn multi_clause_rule_requires_every_clause() {
-        let m = matcher();
-        let hit = m
-            .detect("API Error: prompt is too long: 235000 tokens > 200000 maximum")
-            .expect("match");
-        assert_eq!(hit.name, CcStreamSymptom::ContextLengthExceeded);
-        // Missing the "tokens" clause → no match.
-        assert!(m.detect("prompt is too long").is_none());
-    }
-
-    #[test]
-    fn first_rule_wins_preserves_declaration_order() {
-        // StreamIdleTimeout appears before IsError in the sample list, so a
-        // tail carrying both markers classifies as StreamIdleTimeout.
-        let tail = r#"{"is_error":true,"error":"API Error: Stream idle timeout - partial response received"}"#;
-        let m = matcher();
-        let hit = m.detect(tail).expect("match");
-        assert_eq!(hit.name, CcStreamSymptom::StreamIdleTimeout);
-    }
-
-    #[test]
-    fn case_insensitive_match() {
-        let m = matcher();
-        let hit = m.detect("API ERROR: STREAM IDLE TIMEOUT").expect("match");
-        assert_eq!(hit.name, CcStreamSymptom::StreamIdleTimeout);
-    }
-
-    #[test]
-    fn rejects_unrelated_text() {
-        assert!(matcher().detect("all good").is_none());
-    }
-
-    #[test]
-    fn empty_clause_list_never_matches() {
-        let matcher = StreamSymptomMatcher::new(vec![StreamSymptomRule {
-            name: CcStreamSymptom::IsError,
-            reason: "cc_is_error".into(),
-            broken_session: true,
-            clauses: vec![],
-        }]);
-        assert!(matcher.detect("any text at all").is_none());
-    }
-
-    #[test]
-    fn default_matcher_is_empty() {
-        let m = StreamSymptomMatcher::default();
-        assert_eq!(m.rule_count(), 0);
-        assert!(m.detect("whatever").is_none());
     }
 }

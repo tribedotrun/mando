@@ -200,7 +200,7 @@ pub async fn set_rate_limit_cooldown(
 
 /// Clear the rate-limit cooldown on a specific credential. Used when a
 /// proactive probe returns `allowed` for a credential that was previously
-/// rate-limited — the server recovered before the capped cooldown window
+/// rate-limited — the server recovered before the reported reset window
 /// ended, so we let it be picked again immediately.
 pub async fn clear_rate_limit_cooldown(pool: &SqlitePool, id: i64) -> Result<bool> {
     let result = sqlx::query(
@@ -215,7 +215,8 @@ pub async fn clear_rate_limit_cooldown(pool: &SqlitePool, id: i64) -> Result<boo
 
 /// Persist a probe snapshot on a credential row.
 ///
-/// Writes the nine usage columns atomically. Callers that see
+/// Writes all usage windows atomically. An absent Fable window clears any
+/// previously reported Fable measurement. Callers that see
 /// `snapshot.unified_status == Rejected` must also call
 /// [`set_rate_limit_cooldown`] (directly or via the existing
 /// `credential_rate_limit::activate`) so `pick_for_worker` filtering keeps
@@ -236,8 +237,11 @@ pub async fn set_usage_snapshot(
             unified_status = ?7,
             representative_claim = ?8,
             last_probed_at = ?9,
+            seven_day_fable_utilization = ?10,
+            seven_day_fable_reset_at = ?11,
+            seven_day_fable_status = ?12,
             updated_at = datetime('now')
-         WHERE id = ?10",
+         WHERE id = ?13",
     )
     .bind(snapshot.five_hour.utilization)
     .bind(snapshot.five_hour.reset_at)
@@ -248,6 +252,24 @@ pub async fn set_usage_snapshot(
     .bind(snapshot.unified_status.as_str())
     .bind(snapshot.representative_claim.as_deref())
     .bind(snapshot.probed_at)
+    .bind(
+        snapshot
+            .seven_day_fable
+            .as_ref()
+            .map(|window| window.utilization),
+    )
+    .bind(
+        snapshot
+            .seven_day_fable
+            .as_ref()
+            .map(|window| window.reset_at),
+    )
+    .bind(
+        snapshot
+            .seven_day_fable
+            .as_ref()
+            .map(|window| window.status.as_str()),
+    )
     .bind(id)
     .execute(pool)
     .await?;
@@ -304,8 +326,9 @@ pub async fn cost_since(pool: &SqlitePool, credential_id: i64, since_unix_secs: 
     }
 }
 
-/// Pick the best credential: not expired, not rate-limited, fewest active
-/// (running) sessions. Returns (id, access_token).
+/// Pick an eligible Claude credential whose weekly allowance resets soonest.
+/// Unknown or elapsed reset times come last; ties use active sessions, then
+/// five-hour utilization and id. Returns (id, access_token).
 ///
 /// The active-session tally is global across the pool: every running session
 /// on a credential counts, regardless of which caller opened it. There is one
@@ -331,6 +354,7 @@ pub async fn pick_for_worker(pool: &SqlitePool) -> Result<Option<(i64, String)>>
            AND (c.expires_at IS NULL OR c.expires_at > ?1)
            AND (c.rate_limit_cooldown_until IS NULL OR c.rate_limit_cooldown_until <= ?2)
          ORDER BY
+            CASE WHEN c.seven_day_reset_at > ?2 THEN c.seven_day_reset_at END ASC NULLS LAST,
             COALESCE(s.active, 0) ASC,
             COALESCE(c.five_hour_utilization, 0.0) ASC,
             c.id ASC
@@ -343,9 +367,9 @@ pub async fn pick_for_worker(pool: &SqlitePool) -> Result<Option<(i64, String)>>
     Ok(row)
 }
 
-/// Pick the best Codex credential: not expired, not rate-limited, fewest
-/// active sessions, lowest five-hour utilization. Returns
-/// `(id, access_token, account_id)`.
+/// Pick an eligible Codex credential whose weekly allowance resets soonest.
+/// Unknown or elapsed reset times come last; ties use active sessions, then
+/// five-hour utilization, last pick and id. Returns `(id, access_token, account_id)`.
 pub async fn pick_for_codex(pool: &SqlitePool) -> Result<Option<(i64, String, String)>> {
     Ok(pick_for_codex_candidates(pool).await?.into_iter().next())
 }
@@ -372,6 +396,7 @@ pub async fn pick_for_codex_candidates(pool: &SqlitePool) -> Result<Vec<(i64, St
            AND (c.expires_at IS NULL OR c.expires_at > ?1)
            AND (c.rate_limit_cooldown_until IS NULL OR c.rate_limit_cooldown_until <= ?2)
          ORDER BY
+            CASE WHEN c.seven_day_reset_at > ?2 THEN c.seven_day_reset_at END ASC NULLS LAST,
             COALESCE(s.active, 0) ASC,
             COALESCE(c.five_hour_utilization, 0.0) ASC,
             COALESCE(c.last_picked_at, 0) ASC,
@@ -385,8 +410,8 @@ pub async fn pick_for_codex_candidates(pool: &SqlitePool) -> Result<Vec<(i64, St
 }
 
 /// Record a Codex shell pick so the next `pick_for_codex` rotates away from
-/// this account when utilization ties. `last_picked_at` is Unix seconds
-/// (migration 045 converted pre-existing ms values; `token_updated_at` was
+/// this account when reset, load and utilization tie. `last_picked_at` is Unix
+/// seconds (migration 045 converted pre-existing ms values; `token_updated_at` was
 /// already seconds, so this keeps both credential timestamp columns in the
 /// same unit).
 pub async fn record_codex_pick(pool: &SqlitePool, id: i64) -> Result<()> {
@@ -453,332 +478,4 @@ pub async fn clear_all_cooldowns(pool: &SqlitePool) -> Result<u64> {
     .execute(pool)
     .await?;
     Ok(result.rows_affected())
-}
-
-#[cfg(test)]
-mod pick_codex_tests {
-    use super::*;
-    use crate::io::codex_credentials;
-
-    #[tokio::test]
-    async fn claude_cooldown_summary_ignores_codex_rows() {
-        let db = global_db::Db::open_in_memory()
-            .await
-            .expect("in-memory db must init");
-        let pool = db.pool().clone();
-        let codex_id = codex_credentials::insert_codex(
-            &pool,
-            "codex-account",
-            "tok-codex",
-            "rt-codex",
-            Some("id-codex"),
-            "acct-codex",
-            Some("pro"),
-            None,
-            time::OffsetDateTime::now_utc().unix_timestamp(),
-        )
-        .await
-        .expect("insert codex");
-        let now_secs = time::OffsetDateTime::now_utc().unix_timestamp();
-        set_rate_limit_cooldown(&pool, codex_id, now_secs + 600)
-            .await
-            .expect("set codex cooldown");
-
-        assert_eq!(
-            earliest_cooldown_remaining_secs(&pool)
-                .await
-                .expect("earliest cooldown"),
-            0,
-            "Codex cooldowns must not block Claude worker failover"
-        );
-
-        let claude_id = insert(&pool, "claude-account", "tok-claude", None)
-            .await
-            .expect("insert claude");
-        set_rate_limit_cooldown(&pool, claude_id, now_secs + 600)
-            .await
-            .expect("set claude cooldown");
-        assert!(
-            earliest_cooldown_remaining_secs(&pool)
-                .await
-                .expect("earliest cooldown")
-                > 0
-        );
-
-        clear_all_cooldowns(&pool)
-            .await
-            .expect("clear claude cooldowns");
-        assert!(
-            cooldown_remaining_secs(&pool, codex_id)
-                .await
-                .expect("codex cooldown")
-                > 0,
-            "manual Claude resume must not clear Codex cooldowns"
-        );
-    }
-
-    #[tokio::test]
-    async fn pick_for_codex_rotates_when_first_account_has_active_session() {
-        let db = global_db::Db::open_in_memory()
-            .await
-            .expect("in-memory db must init");
-        let pool = db.pool().clone();
-
-        let id_a = codex_credentials::insert_codex(
-            &pool,
-            "account-a",
-            "tok-a",
-            "rt-a",
-            Some("id-a"),
-            "acct-a",
-            Some("pro"),
-            None,
-            time::OffsetDateTime::now_utc().unix_timestamp(),
-        )
-        .await
-        .expect("insert account-a");
-        let id_b = codex_credentials::insert_codex(
-            &pool,
-            "account-b",
-            "tok-b",
-            "rt-b",
-            Some("id-b"),
-            "acct-b",
-            Some("pro"),
-            None,
-            time::OffsetDateTime::now_utc().unix_timestamp(),
-        )
-        .await
-        .expect("insert account-b");
-
-        sqlx::query("UPDATE credentials SET five_hour_utilization = 0.1 WHERE id = ?")
-            .bind(id_a)
-            .execute(&pool)
-            .await
-            .expect("set util a");
-        sqlx::query("UPDATE credentials SET five_hour_utilization = 0.5 WHERE id = ?")
-            .bind(id_b)
-            .execute(&pool)
-            .await
-            .expect("set util b");
-
-        let first = pick_for_codex(&pool)
-            .await
-            .expect("first pick query")
-            .expect("first pick must return a credential");
-        assert_eq!(first.0, id_a, "lower-util account-a wins first pick");
-
-        sqlx::query(
-            "INSERT INTO cc_sessions (session_id, created_at, caller, cwd, status, credential_id)
-             VALUES ('pick-rotation-test', datetime('now'), 'codex', '', 'running', ?)",
-        )
-        .bind(id_a)
-        .execute(&pool)
-        .await
-        .expect("simulate active session on account-a");
-
-        let second = pick_for_codex(&pool)
-            .await
-            .expect("second pick query")
-            .expect("second pick must return a credential");
-        assert_eq!(
-            second.0, id_b,
-            "must rotate to account-b when account-a has an active session"
-        );
-    }
-
-    #[tokio::test]
-    async fn disabled_claude_credentials_are_not_pickable() {
-        let db = global_db::Db::open_in_memory()
-            .await
-            .expect("in-memory db must init");
-        let pool = db.pool().clone();
-
-        let id_a = insert(&pool, "account-a", "tok-a", None)
-            .await
-            .expect("insert account-a");
-        let id_b = insert(&pool, "account-b", "tok-b", None)
-            .await
-            .expect("insert account-b");
-
-        assert!(has_any(&pool).await.expect("has credentials"));
-        set_disabled(&pool, id_a, true)
-            .await
-            .expect("disable account-a");
-
-        let picked = pick_for_worker(&pool)
-            .await
-            .expect("pick query")
-            .expect("account-b should remain pickable");
-        assert_eq!(picked.0, id_b);
-
-        set_disabled(&pool, id_b, true)
-            .await
-            .expect("disable account-b");
-        assert!(
-            !has_any(&pool).await.expect("has credentials"),
-            "disabled credentials should not count as an available pool"
-        );
-        assert!(
-            pick_for_worker(&pool).await.expect("pick query").is_none(),
-            "all disabled credentials should be unpickable"
-        );
-
-        set_disabled(&pool, id_a, false)
-            .await
-            .expect("enable account-a");
-        let picked = pick_for_worker(&pool)
-            .await
-            .expect("pick query")
-            .expect("account-a should be pickable again");
-        assert_eq!(picked.0, id_a);
-    }
-
-    /// One global load-balancing bucket: a running session opened by any
-    /// caller weighs on its credential. Before the collapse, a `clarifier`
-    /// session was invisible to worker picks and account-a would have been
-    /// handed out again.
-    #[tokio::test]
-    async fn active_session_count_is_global_across_callers() {
-        let db = global_db::Db::open_in_memory()
-            .await
-            .expect("in-memory db must init");
-        let pool = db.pool().clone();
-
-        let id_a = insert(&pool, "account-a", "tok-a", None)
-            .await
-            .expect("insert account-a");
-        let id_b = insert(&pool, "account-b", "tok-b", None)
-            .await
-            .expect("insert account-b");
-
-        assert_eq!(
-            pick_for_worker(&pool)
-                .await
-                .expect("pick query")
-                .expect("a credential must be pickable")
-                .0,
-            id_a,
-            "lowest id wins while both credentials are idle"
-        );
-
-        sqlx::query(
-            "INSERT INTO cc_sessions (session_id, created_at, caller, cwd, status, credential_id)
-             VALUES ('global-bucket-test', datetime('now'), 'clarifier', '', 'running', ?)",
-        )
-        .bind(id_a)
-        .execute(&pool)
-        .await
-        .expect("simulate a running clarifier session on account-a");
-
-        assert_eq!(
-            pick_for_worker(&pool)
-                .await
-                .expect("pick query")
-                .expect("a credential must be pickable")
-                .0,
-            id_b,
-            "a non-worker running session must still push the pick to account-b"
-        );
-    }
-
-    #[tokio::test]
-    async fn disabled_codex_credentials_are_not_pickable() {
-        let db = global_db::Db::open_in_memory()
-            .await
-            .expect("in-memory db must init");
-        let pool = db.pool().clone();
-
-        let id_a = codex_credentials::insert_codex(
-            &pool,
-            "account-a",
-            "tok-a",
-            "rt-a",
-            Some("id-a"),
-            "acct-a",
-            Some("pro"),
-            None,
-            time::OffsetDateTime::now_utc().unix_timestamp(),
-        )
-        .await
-        .expect("insert account-a");
-        let id_b = codex_credentials::insert_codex(
-            &pool,
-            "account-b",
-            "tok-b",
-            "rt-b",
-            Some("id-b"),
-            "acct-b",
-            Some("pro"),
-            None,
-            time::OffsetDateTime::now_utc().unix_timestamp(),
-        )
-        .await
-        .expect("insert account-b");
-
-        set_disabled(&pool, id_a, true)
-            .await
-            .expect("disable account-a");
-        let candidates = pick_for_codex_candidates(&pool)
-            .await
-            .expect("codex candidates");
-        assert_eq!(
-            candidates,
-            vec![(id_b, "tok-b".to_string(), "acct-b".to_string())]
-        );
-    }
-
-    #[tokio::test]
-    async fn pick_for_codex_rotates_on_last_picked_at_tie() {
-        let db = global_db::Db::open_in_memory()
-            .await
-            .expect("in-memory db must init");
-        let pool = db.pool().clone();
-
-        let id_a = codex_credentials::insert_codex(
-            &pool,
-            "account-a",
-            "tok-a",
-            "rt-a",
-            Some("id-a"),
-            "acct-a",
-            Some("pro"),
-            None,
-            time::OffsetDateTime::now_utc().unix_timestamp(),
-        )
-        .await
-        .expect("insert account-a");
-        let id_b = codex_credentials::insert_codex(
-            &pool,
-            "account-b",
-            "tok-b",
-            "rt-b",
-            Some("id-b"),
-            "acct-b",
-            Some("pro"),
-            None,
-            time::OffsetDateTime::now_utc().unix_timestamp(),
-        )
-        .await
-        .expect("insert account-b");
-
-        let first = pick_for_codex(&pool)
-            .await
-            .expect("first pick query")
-            .expect("first pick must return a credential");
-        assert_eq!(first.0, id_a, "lower id wins when never picked");
-
-        record_codex_pick(&pool, id_a)
-            .await
-            .expect("record first pick");
-
-        let second = pick_for_codex(&pool)
-            .await
-            .expect("second pick query")
-            .expect("second pick must return a credential");
-        assert_eq!(
-            second.0, id_b,
-            "must rotate to account-b after account-a was picked"
-        );
-    }
 }

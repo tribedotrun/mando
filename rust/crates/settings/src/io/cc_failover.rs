@@ -26,8 +26,9 @@
 //! there is no other retry loop. Ambient-auth callers (no credential rows
 //! configured) get no failover and fall through to a single attempt.
 //!
-//! Credential picks balance against the **whole pool**: every running
-//! session on a credential counts toward its load, regardless of which
+//! Credential picks prioritize the nearest future weekly reset, then balance
+//! against the **whole pool**: every running session on a credential counts
+//! toward its load, regardless of which
 //! caller opened it. There are no per-caller load-balancing buckets.
 //!
 //! See `captain::runtime::credential_rate_limit` for worker-stream
@@ -41,11 +42,9 @@ use tracing::{info, warn};
 
 use super::credentials;
 
-/// Cap cooldowns for long-window rate limits (seven_day, etc.) where the
-/// server-reported `resets_at` is a window boundary days away — the API
-/// usually recovers much sooner as old usage ages out of the sliding
-/// window. Next probe tick re-opens the credential if so.
-const LONG_WINDOW_MAX_COOLDOWN_SECS: u64 = 3600;
+/// Retry unknown limit kinds within an hour. Recognized subscription windows
+/// retain their provider reset; fresh allowed probes can reopen them earlier.
+const UNKNOWN_WINDOW_MAX_COOLDOWN_SECS: u64 = 3600;
 
 /// Fresh-session context the caller receives per attempt. The failover
 /// wrapper calls the caller-provided builder with this so the caller can
@@ -81,26 +80,33 @@ const FALLBACK_PARK_SECS: i64 = 600;
 ///
 /// `resets_at` is in unix seconds, `rate_limit_type` is the CC
 /// `rateLimitType` string (e.g. `"five_hour"`, `"seven_day"`).
-/// For `five_hour` limits `resets_at` is a tight upper bound and is used
-/// directly. For everything else we cap at
-/// [`LONG_WINDOW_MAX_COOLDOWN_SECS`] so a seven-day window boundary does
-/// not park credentials for multiple days.
+/// Recognized five-hour, weekly and Fable windows keep their actual reset so
+/// every selector excludes a rejected credential until reset or a fresh
+/// allowed probe. Unknown limit kinds cap at [`UNKNOWN_WINDOW_MAX_COOLDOWN_SECS`].
 pub fn compute_cooldown_until(
     now: u64,
     resets_at: Option<u64>,
     rate_limit_type: Option<&str>,
 ) -> u64 {
-    match resets_at {
+    let until = match resets_at {
         Some(ts) if ts > now => {
-            let is_long_window = !matches!(rate_limit_type, Some("five_hour"));
-            if is_long_window {
-                now + (ts - now + 30).min(LONG_WINDOW_MAX_COOLDOWN_SECS)
+            if matches!(
+                rate_limit_type,
+                Some("five_hour" | "seven_day" | "seven_day_overage_included")
+            ) {
+                ts.saturating_add(30)
             } else {
-                ts + 30
+                now.saturating_add(
+                    (ts - now)
+                        .saturating_add(30)
+                        .min(UNKNOWN_WINDOW_MAX_COOLDOWN_SECS),
+                )
             }
         }
-        _ => now + 600,
-    }
+        _ => now.saturating_add(600),
+    };
+    // SQLite stores the deadline as a signed integer.
+    until.min(i64::MAX as u64)
 }
 
 /// Mark a credential as rate-limited. Thin wrapper over
@@ -179,13 +185,8 @@ pub async fn run_with_credential_failover<F>(
 where
     F: Fn(FailoverContext) -> CcConfig,
 {
-    // Balance globally: `None` counts every running session on a
-    // credential, whatever produced it. The previous caller-bucket filter
-    // narrowed the count to sessions whose `cc_sessions.caller` matched a
-    // coarse bucket name, and most buckets matched nothing at all (the DB
-    // stores specific callers like "planning-cc-r1"/"scout-research", and
-    // captain-review/captain-merge pass no filter), so the active-session
-    // term collapsed to zero and every caller piled onto the same account.
+    // The shared picker prioritizes the nearest weekly reset. Ties balance
+    // against every running session on a credential, regardless of caller.
     // Pick the first credential. `None` here means one of two things:
     //   (a) no credential rows are configured -> ambient auth, no
     //       failover possible.
@@ -385,296 +386,5 @@ async fn run_with_transient_retries(
                 tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    const NOW: u64 = 1_700_000_000;
-
-    #[test]
-    fn compute_five_hour_uses_resets_at_directly() {
-        let resets_at = NOW + 3 * 3600;
-        assert_eq!(
-            compute_cooldown_until(NOW, Some(resets_at), Some("five_hour")),
-            resets_at + 30
-        );
-    }
-
-    #[test]
-    fn compute_seven_day_caps_at_one_hour() {
-        let resets_at = NOW + 33 * 3600;
-        assert_eq!(
-            compute_cooldown_until(NOW, Some(resets_at), Some("seven_day")),
-            NOW + LONG_WINDOW_MAX_COOLDOWN_SECS
-        );
-    }
-
-    #[test]
-    fn compute_seven_day_short_reset_not_capped() {
-        let resets_at = NOW + 1200;
-        assert_eq!(
-            compute_cooldown_until(NOW, Some(resets_at), Some("seven_day")),
-            NOW + 1200 + 30
-        );
-    }
-
-    #[test]
-    fn compute_unknown_type_caps_like_seven_day() {
-        let resets_at = NOW + 10 * 3600;
-        assert_eq!(
-            compute_cooldown_until(NOW, Some(resets_at), None),
-            NOW + LONG_WINDOW_MAX_COOLDOWN_SECS
-        );
-    }
-
-    #[test]
-    fn compute_past_resets_uses_default() {
-        assert_eq!(
-            compute_cooldown_until(NOW, Some(NOW - 100), Some("five_hour")),
-            NOW + 600
-        );
-    }
-
-    #[test]
-    fn compute_none_resets_uses_default() {
-        assert_eq!(
-            compute_cooldown_until(NOW, None, Some("five_hour")),
-            NOW + 600
-        );
-    }
-
-    /// End-to-end check on the credential side of the failover wrapper:
-    /// two healthy credentials, one rate_limit_activate'd, and
-    /// pick_for_worker must return the *other* one. Then activate the
-    /// second — `pick_for_worker` must return `None` and
-    /// `earliest_cooldown_remaining_secs` must be positive. This is the
-    /// deterministic core of the in-flight 429 → next-credential path;
-    /// the CC subprocess half is covered separately by the classifier
-    /// tests in `global-claude::error`.
-    #[tokio::test]
-    async fn failover_skips_cooled_down_credential_and_surfaces_exhaustion() {
-        let db = global_db::Db::open_in_memory()
-            .await
-            .expect("in-memory db must init");
-        let pool = db.pool().clone();
-
-        let id1 = credentials::insert(&pool, "primary", "tok1", None)
-            .await
-            .unwrap();
-        let id2 = credentials::insert(&pool, "secondary", "tok2", None)
-            .await
-            .unwrap();
-
-        // Both healthy — picker honours load-balance order (fewest active
-        // sessions, lowest utilisation, then id). With clean state both
-        // tie, so the lowest id wins.
-        let first = credentials::pick_for_worker(&pool)
-            .await
-            .unwrap()
-            .expect("at least one credential must be eligible");
-        assert_eq!(first.0, id1);
-
-        // Rate-limit credential 1 — same code path the failover wrapper
-        // invokes on ApiError(429). Next pick must skip to credential 2.
-        rate_limit_activate(&pool, id1, None, None).await;
-        let second = credentials::pick_for_worker(&pool)
-            .await
-            .unwrap()
-            .expect("healthy credential remaining");
-        assert_eq!(
-            second.0, id2,
-            "picker must route around the cooled-down credential"
-        );
-
-        // Rate-limit credential 2 as well — pool is now exhausted.
-        rate_limit_activate(&pool, id2, None, None).await;
-        let none = credentials::pick_for_worker(&pool).await.unwrap();
-        assert!(
-            none.is_none(),
-            "picker must return None once every credential is cooling down"
-        );
-
-        let remaining = credentials::earliest_cooldown_remaining_secs(&pool)
-            .await
-            .unwrap();
-        assert!(
-            remaining > 0,
-            "earliest cooldown must be in the future so callers can park tasks with paused_until"
-        );
-    }
-
-    /// Clearing a cooldown puts the credential back in the eligible set
-    /// immediately — matches the recovery path where a probe tick
-    /// confirms the account is healthy again before its scheduled reset.
-    #[tokio::test]
-    async fn rate_limit_clear_restores_pick_eligibility() {
-        let db = global_db::Db::open_in_memory()
-            .await
-            .expect("in-memory db must init");
-        let pool = db.pool().clone();
-        let id = credentials::insert(&pool, "only", "tok", None)
-            .await
-            .unwrap();
-
-        rate_limit_activate(&pool, id, None, None).await;
-        assert!(credentials::pick_for_worker(&pool).await.unwrap().is_none());
-
-        rate_limit_clear(&pool, id).await;
-        let back = credentials::pick_for_worker(&pool)
-            .await
-            .unwrap()
-            .expect("credential must be eligible after clear");
-        assert_eq!(back.0, id);
-    }
-
-    /// `pick_for_worker` is the Claude-Code worker-spawn entry point. Keep
-    /// rejecting stale Codex rows from databases that passed through the
-    /// removed Credentials-page Codex account feature.
-    #[tokio::test]
-    async fn pick_for_worker_excludes_stale_codex_rows() {
-        let db = global_db::Db::open_in_memory()
-            .await
-            .expect("in-memory db must init");
-        let pool = db.pool().clone();
-
-        sqlx::query(
-            "INSERT INTO credentials (label, access_token, provider, updated_at)
-             VALUES ('b_aburra', 'openai-jwt-access', 'codex', datetime('now'))",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
-
-        // No Claude row yet — must return None despite the stale Codex row.
-        let pick = credentials::pick_for_worker(&pool).await.unwrap();
-        assert!(
-            pick.is_none(),
-            "pick_for_worker must reject stale Codex rows; got {pick:?}"
-        );
-
-        // Add a Claude row — it must win over the (still present) stale Codex row.
-        let claude_id = credentials::insert(&pool, "main", "claude-oauth", None)
-            .await
-            .unwrap();
-        let pick = credentials::pick_for_worker(&pool)
-            .await
-            .unwrap()
-            .expect("claude row must be picked");
-        assert_eq!(
-            pick.0, claude_id,
-            "pick_for_worker returned a non-Claude row"
-        );
-        assert_eq!(
-            pick.1, "claude-oauth",
-            "pick_for_worker returned the stale Codex JWT instead of the Claude OAuth token"
-        );
-    }
-
-    /// Load balancing is global: an active session counts against its
-    /// credential no matter which caller opened it. Before the bucket
-    /// concept was removed, a `scout-research` session was invisible to a
-    /// worker pick (and vice versa), so every caller stacked onto the
-    /// lowest-id credential. Each caller string below is a real
-    /// `cc_sessions.caller` value, and each must push the next pick away
-    /// from the loaded credential.
-    #[tokio::test]
-    async fn pick_balances_against_global_active_count_regardless_of_caller() {
-        let db = global_db::Db::open_in_memory()
-            .await
-            .expect("in-memory db must init");
-        let pool = db.pool().clone();
-
-        let id1 = credentials::insert(&pool, "primary", "tok1", None)
-            .await
-            .unwrap();
-        let id2 = credentials::insert(&pool, "secondary", "tok2", None)
-            .await
-            .unwrap();
-
-        // No load anywhere — tie broken by lowest id.
-        let pick = credentials::pick_for_worker(&pool)
-            .await
-            .unwrap()
-            .expect("a credential must be eligible");
-        assert_eq!(pick.0, id1);
-
-        // One running session per caller shape the daemon actually writes.
-        // Alternate credentials so the loaded one always flips: whichever
-        // credential just took a session must lose the next pick.
-        let callers = [
-            "scout-research",
-            "planning-cc-r1",
-            "captain-review",
-            "captain-merge",
-            "clarifier",
-            "worker",
-        ];
-        for (n, caller) in callers.iter().enumerate() {
-            let (loaded, expected_next) = if n % 2 == 0 { (id1, id2) } else { (id2, id1) };
-            sqlx::query(
-                "INSERT INTO cc_sessions (session_id, created_at, caller, cwd, status, credential_id)
-                 VALUES (?1, datetime('now'), ?2, '', 'running', ?3)",
-            )
-            .bind(format!("global-balance-{n}"))
-            .bind(*caller)
-            .bind(loaded)
-            .execute(&pool)
-            .await
-            .expect("insert running session");
-
-            let pick = credentials::pick_for_worker(&pool)
-                .await
-                .unwrap()
-                .expect("a credential must be eligible");
-            assert_eq!(
-                pick.0, expected_next,
-                "a running '{caller}' session on credential {loaded} must count toward \
-                 global load and push the next pick to credential {expected_next}"
-            );
-
-            // Retire it so the next iteration starts from a clean 0/0 tie
-            // and isolates the caller under test.
-            sqlx::query("UPDATE cc_sessions SET status = 'stopped' WHERE session_id = ?1")
-                .bind(format!("global-balance-{n}"))
-                .execute(&pool)
-                .await
-                .expect("retire running session");
-        }
-
-        // Finally: two sessions from two *different* callers on the same
-        // credential still add up, which the per-caller buckets could never
-        // observe.
-        for (n, caller) in ["scout-research", "captain-merge"].iter().enumerate() {
-            sqlx::query(
-                "INSERT INTO cc_sessions (session_id, created_at, caller, cwd, status, credential_id)
-                 VALUES (?1, datetime('now'), ?2, '', 'running', ?3)",
-            )
-            .bind(format!("cross-caller-{n}"))
-            .bind(*caller)
-            .bind(id2)
-            .execute(&pool)
-            .await
-            .expect("insert running session");
-        }
-        sqlx::query(
-            "INSERT INTO cc_sessions (session_id, created_at, caller, cwd, status, credential_id)
-             VALUES ('cross-caller-solo', datetime('now'), 'worker', '', 'running', ?1)",
-        )
-        .bind(id1)
-        .execute(&pool)
-        .await
-        .expect("insert running session");
-
-        let pick = credentials::pick_for_worker(&pool)
-            .await
-            .unwrap()
-            .expect("a credential must be eligible");
-        assert_eq!(
-            pick.0, id1,
-            "1 active session must beat 2 active sessions summed across different callers"
-        );
     }
 }

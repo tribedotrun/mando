@@ -172,8 +172,8 @@ pub struct SpawnResult {
 
 /// Build the env overrides for a resumed worker process.
 ///
-/// Uses the session's original credential if still healthy (not rate-limited,
-/// not expired). Otherwise picks a fresh credential via load balancing.
+/// Picks a fresh healthy credential from the pool, using its reset priority
+/// and load balancing.
 /// Returns (env_map, credential_id_used).
 #[tracing::instrument(skip_all)]
 pub(crate) async fn credential_env_for_session(

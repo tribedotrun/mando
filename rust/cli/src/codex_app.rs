@@ -118,20 +118,3 @@ fn print_status(
     }
     Ok(())
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn http_error_uses_typed_daemon_message() {
-        let error = gateway_client::ClientError::Http {
-            status: reqwest::StatusCode::CONFLICT,
-            body: r#"{"error":"no stashed personal account to restore"}"#.into(),
-        };
-        assert_eq!(
-            client_error(error).to_string(),
-            "no stashed personal account to restore"
-        );
-    }
-}

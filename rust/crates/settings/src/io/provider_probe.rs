@@ -2,9 +2,9 @@
 //!
 //! See PR #1006. Routes by `CredentialRow.provider`:
 //!
-//! - `claude` → `usage_probe::probe(access_token)` and the existing header-
-//!   parse path. No token refresh; Claude OAuth tokens don't have a
-//!   refresh-token equivalent.
+//! - `claude` → `usage_probe::probe(access_token)`, an isolated Claude Code
+//!   print session that returns aggregate and Fable usage. Stored setup
+//!   tokens do not carry refresh tokens.
 //! - `codex` → optional proactive `codex_oauth_refresh::refresh()` (if the
 //!   stored access-token JWT exp is within 5 min or `last_probed_at` is older
 //!   than 7 days), then `codex_probe::probe()`. On 401 from the probe itself, one

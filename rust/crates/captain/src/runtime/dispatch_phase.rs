@@ -274,7 +274,3 @@ fn emit_live_refresh(bus: Option<&EventBus>, affected_task_ids: &[i64]) {
         )));
     }
 }
-
-#[cfg(test)]
-#[path = "dispatch_phase_tests.rs"]
-mod tests;

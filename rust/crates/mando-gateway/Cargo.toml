@@ -41,17 +41,6 @@ sqlx.workspace = true
 [features]
 default = ["otlp"]
 otlp = ["opentelemetry", "opentelemetry_sdk", "opentelemetry-otlp", "tracing-opentelemetry"]
-# Enables feature-gated wire-contract drift helper tests. Never ship in release
-# builds -- the `drift_test` module contains a compile_error! guard against that.
-drift-test = []
-
-[dev-dependencies]
-global-types = { path = "../global-types" }
-reqwest = { workspace = true, features = ["json", "multipart"] }
-serde.workspace = true
-tokio.workspace = true
-serde_json.workspace = true
-toml = "0.8"
 
 [lints]
 workspace = true

@@ -47,6 +47,7 @@ interface GlobalKeyboardConfig {
   onNavigate: (tab: 'captain' | 'scout' | 'sessions') => void;
   onTogglePalette: () => void;
   onOpenSettings: () => void;
+  onOpenCredentials: () => void;
   onToggleShortcuts: () => void;
   onGoBack: () => void;
   onGoForward: () => void;
@@ -55,7 +56,7 @@ interface GlobalKeyboardConfig {
 
 /**
  * App-level keyboard handler.
- * Handles meta combos (⌘K, ⌘,), G-prefix navigation sequences (G C/D/S),
+ * Handles meta combos (⌘K, ⌘,, ⌘⇧,), G-prefix navigation sequences (G C/D/S),
  * ? (palette), Escape (close overlays), and dispatches remaining keys to the view.
  */
 export function useGlobalKeyboard(config: GlobalKeyboardConfig): void {
@@ -77,9 +78,10 @@ export function useGlobalKeyboard(config: GlobalKeyboardConfig): void {
           s.onTogglePalette();
           return;
         }
-        if (e.metaKey && e.key === ',') {
+        if (e.metaKey && (e.key === ',' || e.code === 'Comma')) {
           e.preventDefault();
-          s.onOpenSettings();
+          if (e.shiftKey) s.onOpenCredentials();
+          else s.onOpenSettings();
           return;
         }
         if (e.key === '[') {

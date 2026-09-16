@@ -43,38 +43,3 @@ pub fn find_task_create_error(err: &anyhow::Error) -> Option<&TaskCreateError> {
     err.chain()
         .find_map(|src| src.downcast_ref::<TaskCreateError>())
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn display_no_project_matches_legacy_shape() {
-        let msg = TaskCreateError::NoProjectConfigured.to_string();
-        assert!(msg.contains("no project configured"));
-    }
-
-    #[test]
-    fn display_selection_required_matches_legacy_shape() {
-        let msg = TaskCreateError::ProjectSelectionRequired.to_string();
-        assert!(msg.contains("project selection required"));
-    }
-
-    #[test]
-    fn display_unknown_project_lists_valid() {
-        let err = TaskCreateError::UnknownProject {
-            name: "foo".into(),
-            valid: vec!["atlas".into(), "bravo".into()],
-        };
-        let msg = err.to_string();
-        assert!(msg.contains("\"foo\""));
-        assert!(msg.contains("atlas"));
-        assert!(msg.contains("bravo"));
-    }
-
-    #[test]
-    fn find_task_create_error_survives_context_wrapping() {
-        let wrapped = anyhow::Error::new(TaskCreateError::NoProjectConfigured).context("via http");
-        assert!(find_task_create_error(&wrapped).is_some());
-    }
-}

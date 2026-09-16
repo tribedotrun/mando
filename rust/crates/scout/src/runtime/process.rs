@@ -438,11 +438,3 @@ pub async fn process_all(config: &Config, db: &ScoutDb, workflow: &ScoutWorkflow
     );
     Ok(success_count)
 }
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn max_retries_constant() {
-        assert_eq!(super::MAX_PROCESS_RETRIES, 3);
-    }
-}

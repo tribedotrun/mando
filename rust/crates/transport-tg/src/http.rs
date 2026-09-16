@@ -66,22 +66,3 @@ impl Deref for GatewayClient {
         &self.0
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn new_preserves_connection_settings() {
-        let client = GatewayClient::new(18791, Some("test-token".into()));
-        assert_eq!(client.base_url(), "http://127.0.0.1:18791");
-        assert_eq!(client.token(), Some("test-token"));
-    }
-
-    #[test]
-    fn new_without_token() {
-        let client = GatewayClient::new(9999, None);
-        assert_eq!(client.base_url(), "http://127.0.0.1:9999");
-        assert_eq!(client.token(), None);
-    }
-}

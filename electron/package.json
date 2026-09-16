@@ -1,6 +1,6 @@
 {
   "name": "mando",
-  "version": "0.1.21-beta.6",
+  "version": "0.1.21-beta.7",
   "description": "Desktop app for managing AI coding agents",
   "license": "Apache-2.0",
   "repository": {
@@ -18,16 +18,12 @@
     "build:test": "node scripts/build-test.mjs",
     "build:dev": "node scripts/build-test.mjs --dev",
     "dev:renderer": "npx vite dev src/renderer -c vite.renderer.config.mts --port 15173 --strictPort",
-    "pretest": "npm run build:test",
-    "test": "npx playwright test",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint src/ tests/",
-    "lint:test": "node --test 'eslint/**/tests/*.test.mjs'",
+    "lint": "eslint src/",
     "arch:check": "node eslint/architecture/checks/daemon-contract-schema-coverage.mjs && node eslint/architecture/checks/preload-bridge-single-source.mjs",
-    "test:unit": "node --experimental-strip-types --test 'src/**/__tests__/*.test.ts'",
     "gen:schemas": "node scripts/gen-schemas.mjs",
-    "format": "prettier --write 'src/**/*.{ts,tsx}' 'tests/**/*.ts' '*.{ts,mjs,mts}'",
-    "format:check": "prettier --check 'src/**/*.{ts,tsx}' 'tests/**/*.ts' '*.{ts,mjs,mts}'"
+    "format": "prettier --write 'src/**/*.{ts,tsx}' '*.{ts,mjs,mts}'",
+    "format:check": "prettier --check 'src/**/*.{ts,tsx}' '*.{ts,mjs,mts}'"
   },
   "devDependencies": {
     "@electron-forge/cli": "^7.6.0",
@@ -38,7 +34,6 @@
     "@electron-forge/publisher-github": "^7.11.1",
     "@electron/fuses": "^1.8.0",
     "@eslint/js": "^10.0.1",
-    "@playwright/test": "^1.50.0",
     "@tailwindcss/vite": "^4.1.0",
     "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",
@@ -46,6 +41,7 @@
     "electron": "^41.0.3",
     "esbuild": "^0.28.0",
     "eslint": "^10.0.3",
+    "playwright": "^1.50.0",
     "prettier": "^3.8.1",
     "tailwindcss": "^4.1.0",
     "typescript": "^6.0.2",

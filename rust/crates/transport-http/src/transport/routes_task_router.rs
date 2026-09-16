@@ -8,7 +8,8 @@ use crate::{
 pub(crate) fn task_routes() -> ApiRouter<AppState> {
     let router = ApiRouter::new()
         .merge(task_detail_routes())
-        .merge(artifact_routes());
+        .merge(artifact_routes())
+        .merge(task_add_routes());
     let router = crate::api_route!(
         router,
         GET "/api/tasks",
@@ -36,15 +37,6 @@ pub(crate) fn task_routes() -> ApiRouter<AppState> {
         body = api_types::TaskPatchRequest,
         params = api_types::TaskIdParams,
         res = api_types::BoolOkResponse
-    );
-    let router = crate::api_route!(
-        router,
-        POST "/api/tasks/add",
-        transport = Multipart,
-        auth = Protected,
-        handler = routes_tasks::post_task_add,
-        body = api_types::TaskAddRequest,
-        res = api_types::TaskItem
     );
     let router = crate::api_route!(
         router,
@@ -256,4 +248,20 @@ fn artifact_routes() -> ApiRouter<AppState> {
         params = api_types::ArtifactIdParams,
         res = api_types::BoolOkResponse
     )
+}
+
+// Several screenshots may share a request. Keep this override scoped to task
+// creation; save_image_field still enforces the 10 MiB per-image limit.
+fn task_add_routes() -> ApiRouter<AppState> {
+    let router = ApiRouter::new();
+    let router = crate::api_route!(
+        router,
+        POST "/api/tasks/add",
+        transport = Multipart,
+        auth = Protected,
+        handler = routes_tasks::post_task_add,
+        body = api_types::TaskAddRequest,
+        res = api_types::TaskItem
+    );
+    router.with_body_limit(50 * 1024 * 1024)
 }

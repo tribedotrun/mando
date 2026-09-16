@@ -63,13 +63,13 @@ mando sessions tools
 mando sessions transcript	
 mando tasks	--all
 mando todo	
-mando todo add	--no-auto-merge,--no-pr,--plan,-p/--project
+mando todo add	--context,--context-file,--glm-worker,--image,--json,--no-auto-merge,--no-pr,--plan,--provider,-p/--project
 mando todo bulk	--stdin,-p/--project
 mando todo delete	
 mando todo evidence	--allow-static,--caption,--kind,--task
 mando todo input	
-mando todo list	--all
-mando todo show	
+mando todo list	--all,--json
+mando todo show	--json
 mando todo summary	--file
 mando todo timeline	--last
 mando triage	

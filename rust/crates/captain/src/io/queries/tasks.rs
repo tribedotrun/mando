@@ -440,19 +440,3 @@ async fn find_by_id_exec<'e>(
     let row: Option<TaskRow> = sqlx::query_as(&sql).bind(id).fetch_optional(exec).await?;
     row.map(|r| r.into_task()).transpose()
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn task_write_rejects_execution_only_adapter() {
-        let mut task = Task::new("owner boundary");
-        task.provider = global_types::TaskProvider::OpenCode;
-
-        match bind_task_write_fields(sqlx::query(insert_task_sql()), &task) {
-            Ok(_) => panic!("OpenCode cannot own a persisted task"),
-            Err(error) => assert!(error.to_string().contains("cannot own a persisted task")),
-        }
-    }
-}

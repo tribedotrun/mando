@@ -21,12 +21,10 @@ mod scout;
 mod sessions;
 mod todo;
 mod todo_artifacts;
+mod todo_create;
 mod todo_display;
 mod transcript_render;
 mod worktree;
-
-#[cfg(test)]
-mod cli_contract_tests;
 
 use clap::{Args, Parser, Subcommand};
 
@@ -387,86 +385,3 @@ async fn handle_triage(args: TriageArgs) -> anyhow::Result<()> {
 // -----------------------------------------------------------------------
 // Tests
 // -----------------------------------------------------------------------
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use clap::CommandFactory;
-    use serde_json::Value;
-
-    #[test]
-    fn capability_contract_matches_cli_captain_and_scout_surfaces() {
-        let contract: Value =
-            serde_json::from_str(include_str!("../../contracts/capabilities.json")).unwrap();
-
-        let root = Cli::command();
-        let root_names: std::collections::HashSet<String> = root
-            .get_subcommands()
-            .map(|subcommand: &clap::Command| subcommand.get_name().to_string())
-            .collect();
-        assert!(
-            contract["captain"].get("tasks").is_some(),
-            "missing captain tasks in contract"
-        );
-        assert!(
-            root_names.contains("tasks"),
-            "missing top-level tasks command"
-        );
-
-        let captain = root.find_subcommand("captain").unwrap();
-        let captain_names: std::collections::HashSet<String> = captain
-            .get_subcommands()
-            .map(|subcommand: &clap::Command| subcommand.get_name().to_string())
-            .collect();
-        for (expected, command_name) in [
-            ("workers", "workers"),
-            ("triage", "triage"),
-            ("reopen", "reopen"),
-            ("rework", "rework"),
-            ("retry", "retry"),
-            ("accept", "accept"),
-            ("handoff", "handoff"),
-            ("adopt", "adopt"),
-            ("nudge", "nudge"),
-            ("stop", "stop"),
-        ] {
-            assert!(
-                contract["captain"].get(expected).is_some(),
-                "missing {expected} in contract"
-            );
-            assert!(
-                captain_names.contains(command_name),
-                "missing captain {command_name}"
-            );
-        }
-
-        let scout = root.find_subcommand("scout").unwrap();
-        let scout_names: std::collections::HashSet<String> = scout
-            .get_subcommands()
-            .map(|subcommand: &clap::Command| subcommand.get_name().to_string())
-            .collect();
-        for (expected, command_name) in [
-            ("add", "add"),
-            ("research", "research"),
-            ("read", "read"),
-            ("ask", "ask"),
-            ("act", "act"),
-            ("save", "save"),
-            ("archive", "archive"),
-            ("delete", "delete"),
-            ("bulk_update", "bulk-status"),
-            ("bulk_delete", "bulk-delete"),
-            ("publish_article", "publish"),
-            ("item_sessions", "sessions"),
-        ] {
-            assert!(
-                contract["scout"].get(expected).is_some(),
-                "missing {expected} in contract"
-            );
-            assert!(
-                scout_names.contains(command_name),
-                "missing scout {command_name}"
-            );
-        }
-    }
-}

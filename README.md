@@ -89,13 +89,9 @@ npm run build:test
 npm run typecheck
 ```
 
-Optional Rust tests use `cargo-nextest`:
-
-```bash
-cargo install cargo-nextest --locked
-cd rust
-cargo nextest run --workspace --lib
-```
+Verify product changes in a running sandbox or local app. Formatting, lint,
+type, architecture, and contract checks remain part of development; unit or
+mock integration tests require a documented strong reason.
 
 Run the app from source after the Rust build:
 

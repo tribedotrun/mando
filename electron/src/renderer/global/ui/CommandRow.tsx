@@ -9,6 +9,7 @@ import {
   Target,
   RefreshCw,
   Settings,
+  KeyRound,
 } from 'lucide-react';
 import { CommandItem, CommandShortcut } from '#renderer/global/ui/primitives/command';
 import { Kbd, KbdGroup } from '#renderer/global/ui/primitives/kbd';
@@ -48,6 +49,13 @@ export const RECENT_COMMANDS: CommandDef[] = [
 ];
 
 export const NAVIGATION_COMMANDS: CommandDef[] = [
+  {
+    id: 'nav-credentials',
+    name: 'Credentials',
+    shortcut: '\u2318\u21e7,',
+    section: 'navigation',
+    icon: <KeyRound size={16} />,
+  },
   {
     id: 'nav-captain',
     name: 'Captain',

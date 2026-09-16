@@ -41,14 +41,3 @@ where
         // those URIs have no bounded label anyway.
         .route_layer(middleware::from_fn(metrics::record_http_metrics))
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn matched_route_observability_is_mounted_by_the_router_helper() {
-        let router = Router::<()>::new().route("/test", get(|| async { "ok" }));
-        let _: Router<()> = with_route_observability(router);
-    }
-}

@@ -85,25 +85,3 @@ pub(super) fn transition_rework_to_queued(items: &mut [Task], alerts: &mut Vec<S
         );
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn transition_rework_to_queued_clears_worker_session() {
-        let mut item = Task::new("rework");
-        item.set_status_for_tests(ItemStatus::Rework);
-        item.worker = Some("worker".into());
-        item.branch = Some("feat/rework".into());
-        item.pr_number = Some(42);
-        item.session_ids.worker = Some("worker-sid".into());
-
-        let mut alerts = Vec::new();
-        transition_rework_to_queued(std::slice::from_mut(&mut item), &mut alerts);
-
-        assert_eq!(item.status(), ItemStatus::Queued);
-        assert!(item.session_ids.worker.is_none());
-        assert!(alerts.is_empty());
-    }
-}

@@ -18,6 +18,9 @@ pub struct CredentialRow {
     pub seven_day_utilization: Option<f64>,
     pub seven_day_reset_at: Option<i64>,
     pub seven_day_status: Option<String>,
+    pub seven_day_fable_utilization: Option<f64>,
+    pub seven_day_fable_reset_at: Option<i64>,
+    pub seven_day_fable_status: Option<String>,
     pub unified_status: Option<String>,
     pub representative_claim: Option<String>,
     pub last_probed_at: Option<i64>,
@@ -71,6 +74,8 @@ pub struct CredentialInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub seven_day: Option<CredentialWindowInfo>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub seven_day_fable: Option<CredentialWindowInfo>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub unified_status: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub representative_claim: Option<String>,
@@ -119,6 +124,11 @@ impl CredentialRow {
                 self.seven_day_utilization,
                 self.seven_day_reset_at,
                 self.seven_day_status.as_deref(),
+            ),
+            seven_day_fable: window_info(
+                self.seven_day_fable_utilization,
+                self.seven_day_fable_reset_at,
+                self.seven_day_fable_status.as_deref(),
             ),
             unified_status: self.unified_status.clone(),
             representative_claim: self.representative_claim.clone(),

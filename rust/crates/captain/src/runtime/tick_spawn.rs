@@ -19,14 +19,13 @@ pub struct ItemSpawnResult {
 }
 
 /// Any picked credential with `last_probed_at` older than this triggers a
-/// synchronous pre-spawn probe. Catches the case where a credential sits at
-/// 79% utilization between scheduled poll ticks and a new worker would
-/// otherwise sail into the 5h wall a few minutes in.
-const PRE_SPAWN_STALE_SECS: i64 = 300;
+/// synchronous pre-spawn probe. Keep this aligned with the scheduled Claude
+/// refresh so worker launches do not generate frequent dummy sessions.
+const PRE_SPAWN_STALE_SECS: i64 = 3 * 60 * 60;
 
 /// Pick the best credential via a single DB query: not expired, not
-/// rate-limited, fewest active running sessions, tiebreak on lowest
-/// five-hour utilization.
+/// rate-limited, nearest future weekly reset, then fewest active running
+/// sessions and lowest five-hour utilization.
 /// Returns `(id, access_token)` or `None` if no credentials are configured.
 ///
 /// The pool is one global load-balancing bucket — every running session on a
@@ -62,7 +61,10 @@ pub async fn pick_credential(pool: &sqlx::SqlitePool) -> Option<(i64, String)> {
         };
         let needs_probe = row
             .last_probed_at
-            .is_none_or(|last| now_secs - last > PRE_SPAWN_STALE_SECS);
+            .is_none_or(|last| now_secs - last >= PRE_SPAWN_STALE_SECS)
+            || row
+                .rate_limit_cooldown_until
+                .is_some_and(|until| until > 0 && until <= now_secs);
         if !needs_probe {
             return Some((id, token));
         }
@@ -84,6 +86,10 @@ pub async fn pick_credential(pool: &sqlx::SqlitePool) -> Option<(i64, String)> {
                 continue;
             }
             Ok(_) => return Some((id, token)),
+            Err(settings::usage_probe::ProbeError::RateLimited { .. }) => {
+                any_rejected = true;
+                continue;
+            }
             Err(settings::usage_probe::ProbeError::Unauthorized) => {
                 tracing::warn!(
                     module = "credentials",

@@ -37,7 +37,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.21-beta.6"
+version = "0.1.21-beta.7"
 edition = "2021"
 license = "Apache-2.0"
 repository = "https://github.com/tribedotrun/mando"
@@ -103,8 +103,7 @@ debug = 0
 # - #2 no silent error absorption — `let _ = Result<...>` is rejected.
 # The denies are passed on the command line in `mando-dev check` so
 # `cargo clippy --workspace` (no --all-targets) only applies them to
-# library builds; #[cfg(test)] modules and integration tests are not
-# linted, matching the plan's carve-out for test code.
+# library builds.
 # Raw stdout, stderr, and dbg macros are denied through workspace Clippy
 # lints; every workspace package opts in through its Cargo manifest.
 

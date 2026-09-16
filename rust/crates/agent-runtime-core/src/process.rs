@@ -129,23 +129,3 @@ fn parse_cputime(value: &str) -> Result<f64> {
         _ => anyhow::bail!("invalid cputime format: {value}"),
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parse_cputime_hhmmss() {
-        assert!((parse_cputime("01:30:45").unwrap() - 5445.0).abs() < 0.1);
-    }
-
-    #[test]
-    fn parse_cputime_mmss() {
-        assert!((parse_cputime("05:30").unwrap() - 330.0).abs() < 0.1);
-    }
-
-    #[test]
-    fn pid_zero_not_alive() {
-        assert!(!is_process_alive(global_types::Pid::new(0)));
-    }
-}

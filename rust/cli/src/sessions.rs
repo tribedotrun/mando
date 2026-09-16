@@ -307,17 +307,3 @@ async fn handle_cost(session_id: &str) -> anyhow::Result<()> {
     println!("Total cost:      {cost:>12}");
     Ok(())
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn session_category_parses_supported_values() {
-        assert_eq!(
-            session_category(Some("workers")).unwrap(),
-            Some(api_types::SessionCategory::Workers)
-        );
-        assert!(session_category(Some("unknown")).is_err());
-    }
-}

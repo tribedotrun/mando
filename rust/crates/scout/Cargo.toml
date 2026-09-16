@@ -33,8 +33,5 @@ sha2 = { workspace = true }
 regex = { workspace = true }
 html5ever.workspace = true
 
-[features]
-dev-mocks = []
-
 [lints]
 workspace = true

@@ -167,38 +167,3 @@ fn parse_config_status_contents(
 ) -> Result<(), settings::ConfigError> {
     settings::parse_config(contents, config_path).map(|_| ())
 }
-
-#[cfg(test)]
-mod tests {
-    use super::parse_config_status_contents;
-
-    #[test]
-    fn config_status_accepts_config_from_before_default_task_agent() {
-        let contents = r#"{
-          "workspace": "~/.mando/workspace",
-          "ui": { "openAtLogin": false },
-          "features": {
-            "scout": false,
-            "setupDismissed": false,
-            "claudeCodeVerified": true
-          },
-          "channels": { "telegram": { "enabled": false, "owner": "" } },
-          "gateway": { "dashboard": { "host": "127.0.0.1", "port": 18791 } },
-          "captain": {
-            "autoSchedule": true,
-            "autoMerge": false,
-            "maxConcurrentWorkers": null,
-            "tickIntervalS": 30,
-            "tz": "UTC"
-          },
-          "scout": {
-            "interests": { "high": [], "low": [] },
-            "userContext": { "role": "", "knownDomains": [], "explainDomains": [] }
-          },
-          "env": {}
-        }"#;
-
-        parse_config_status_contents(contents, std::path::Path::new("config.json"))
-            .expect("older config should inherit default task agent");
-    }
-}

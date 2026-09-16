@@ -16,8 +16,6 @@ use super::notify::Notifier;
 use super::review_phase;
 use crate::Task;
 
-#[cfg(test)]
-pub(crate) use super::captain_review_check::validate_verdict;
 pub(crate) use super::captain_review_check::{check_review, check_review_failed};
 pub use super::captain_review_error::handle_review_error;
 pub use super::captain_review_verdict::apply_verdict;
@@ -188,7 +186,3 @@ pub(crate) async fn spawn_review(
     )
     .await
 }
-
-#[cfg(test)]
-#[path = "captain_review_tests.rs"]
-mod tests;

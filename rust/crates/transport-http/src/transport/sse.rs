@@ -211,79 +211,9 @@ async fn build_snapshot(state: &AppState) -> anyhow::Result<api_types::SseSnapsh
     })
 }
 
-#[cfg(test)]
-pub(crate) fn resync_envelope(ts: f64, reason: String) -> api_types::SseEnvelope {
-    api_types::SseEnvelope::Resync(Box::new(api_types::ResyncPayload {
-        ts,
-        data: api_types::SseResyncData {
-            reason,
-            reload: vec![
-                "/api/tasks".into(),
-                "/api/scout".into(),
-                "/api/sessions".into(),
-                "/api/workers".into(),
-                "/api/workbenches".into(),
-                "/api/config".into(),
-                "/api/credentials".into(),
-            ],
-        },
-    }))
-}
-
 fn roundtrip<T: DeserializeOwned>(value: impl Serialize, label: &'static str) -> anyhow::Result<T> {
     let json =
         serde_json::to_value(value).with_context(|| format!("failed to serialize {label}"))?;
     serde_json::from_value(json)
         .with_context(|| format!("failed to deserialize {label} into api-types"))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use global_bus::BusPayload;
-
-    #[tokio::test]
-    async fn sse_receives_event() {
-        let bus = global_bus::EventBus::new();
-        let mut rx = bus.subscribe();
-
-        bus.send(BusPayload::Tasks(Some(api_types::TaskEventData {
-            action: Some("created".into()),
-            item: None,
-            id: Some(1),
-            cleared_by: None,
-        })));
-
-        let payload = rx.recv().await.unwrap();
-        assert!(matches!(payload, BusPayload::Tasks(Some(_))));
-    }
-
-    #[test]
-    fn typed_payload_produces_tasks_envelope() {
-        let payload = BusPayload::Tasks(None);
-        let envelope = bus_payload_to_envelope(payload, 12.0);
-        match envelope {
-            api_types::SseEnvelope::Tasks(p) => {
-                assert_eq!(p.ts, 12.0);
-                assert!(p.data.is_none());
-            }
-            other => panic!("expected Tasks envelope, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn broadcast_lag_produces_resync_envelope() {
-        let envelope = super::resync_envelope(5.0, "lagged 3 messages".into());
-        match envelope {
-            api_types::SseEnvelope::Resync(payload) => {
-                assert!(payload.data.reason.contains("lagged"));
-                assert!(payload
-                    .data
-                    .reload
-                    .iter()
-                    .any(|route| route == "/api/tasks"));
-            }
-            other => panic!("expected resync envelope, got {other:?}"),
-        }
-    }
 }

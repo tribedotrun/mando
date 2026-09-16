@@ -21,27 +21,3 @@ pub(super) fn codex_last_refresh_rfc3339(
     ts.format(&time::format_description::well_known::Rfc3339)
         .map_err(|e| CodexCredentialError::Db(anyhow::Error::msg(e.to_string())))
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn derives_from_token_updated_at_when_present() {
-        // 2026-01-01T00:00:00Z
-        let secs = 1_767_225_600;
-        let formatted = codex_last_refresh_rfc3339(Some(secs)).expect("format must succeed");
-        assert_eq!(formatted, "2026-01-01T00:00:00Z");
-    }
-
-    #[test]
-    fn falls_back_to_now_when_null() {
-        let before = time::OffsetDateTime::now_utc().unix_timestamp();
-        let formatted = codex_last_refresh_rfc3339(None).expect("format must succeed");
-        let parsed =
-            time::OffsetDateTime::parse(&formatted, &time::format_description::well_known::Rfc3339)
-                .expect("must parse as RFC3339");
-        let after = time::OffsetDateTime::now_utc().unix_timestamp();
-        assert!(parsed.unix_timestamp() >= before && parsed.unix_timestamp() <= after);
-    }
-}

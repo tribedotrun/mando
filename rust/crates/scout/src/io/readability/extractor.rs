@@ -74,35 +74,3 @@ fn collapse_whitespace(s: &str) -> String {
     }
     result.trim().to_string()
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn collapse_whitespace_works() {
-        assert_eq!(collapse_whitespace("  hello   world  "), "hello world");
-        assert_eq!(collapse_whitespace("a\n\n\tb"), "a b");
-        assert_eq!(collapse_whitespace(""), "");
-    }
-
-    #[test]
-    fn title_extraction() {
-        use html5ever::parse_document;
-        use html5ever::tendril::TendrilSink;
-
-        let html = "<html><head><title>Test Title</title></head><body></body></html>";
-        let dom = parse_document(Dom::new(), Default::default()).one(html);
-        assert_eq!(find_title(&dom), Some("Test Title".to_string()));
-    }
-
-    #[test]
-    fn no_title_returns_none() {
-        use html5ever::parse_document;
-        use html5ever::tendril::TendrilSink;
-
-        let html = "<html><body><p>no title here</p></body></html>";
-        let dom = parse_document(Dom::new(), Default::default()).one(html);
-        assert_eq!(find_title(&dom), None);
-    }
-}

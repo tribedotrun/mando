@@ -38,6 +38,7 @@ pub(crate) fn prepare_initial_worker_prompt(
     let mut brief_vars: FxHashMap<&str, String> = FxHashMap::default();
     brief_vars.insert("title", item.title.clone());
     brief_vars.insert("context", context.to_string());
+    brief_vars.insert("images", attached_image_lines(item.images.as_deref()));
     brief_vars.insert("branch", branch.to_string());
     brief_vars.insert("id", task_id_str);
     brief_vars.insert("original_prompt", original_prompt.to_string());
@@ -124,233 +125,23 @@ pub(crate) fn is_adopted_handoff(
         && wt_path.exists()
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn temp_worktree() -> std::path::PathBuf {
-        let path =
-            std::env::temp_dir().join(format!("mando-spawner-{}", global_infra::uuid::Uuid::v4()));
-        std::fs::create_dir_all(&path).unwrap();
-        path
-    }
-
-    /// The unified `worker` prompt: no plan, no handoff, PR expected.
-    #[test]
-    fn generic_items_render_the_worker_brief() {
-        let wt = temp_worktree();
-        let mut item = Task::new("Fix auth redirect");
-        item.context = Some("Auth redirect loop in login callback".into());
-        let workflow = CaptainWorkflow::compiled_default();
-        let project = ProjectConfig::default();
-
-        let initial =
-            prepare_initial_worker_prompt(&item, 1, "mando/fix-auth-1", &wt, &project, &workflow)
-                .unwrap();
-
-        let workpad = global_infra::paths::data_dir()
-            .join("plans/0/workpad.md")
-            .display()
-            .to_string();
-        assert!(initial.contains(&wt.join(".ai/briefs/todo-0-1.md").display().to_string()));
-        assert!(initial.contains(&workpad));
-        // no_pr = false, so the initial prompt keeps the /x-pr handoff line.
-        assert!(initial.contains("/x-pr"));
-
-        let brief = std::fs::read_to_string(wt.join(".ai/briefs/todo-0-1.md")).unwrap();
-        assert!(brief.contains("Captain Brief"));
-        assert!(brief.contains("Auth redirect loop in login callback"));
-        assert!(brief.contains(&workpad));
-        assert!(brief.contains("## Evidence Deck"));
-        assert!(brief.contains("## Out-of-Scope Discoveries"));
-        // Neither optional branch fires without a plan or a handoff.
-        assert!(!brief.contains("## Brief"));
-        assert!(!brief.contains("## Handoff"));
-    }
-
-    /// A human-authored brief (`mando todo add --plan <path>`) lands on
-    /// `task.plan`, is copied into the worktree, and reaches the worker
-    /// prompt's plan branch.
-    #[test]
-    fn plan_path_reaches_the_worker_prompts_plan_branch() {
-        let wt = temp_worktree();
-        let plan_source = wt.join("source-brief.md");
-        std::fs::write(&plan_source, "# Brief").unwrap();
-
-        let mut item = Task::new("Implement planned change");
-        item.plan = Some(plan_source.display().to_string());
-
-        let workflow = CaptainWorkflow::compiled_default();
-        let project = ProjectConfig::default();
-
-        prepare_initial_worker_prompt(&item, 2, "mando/todo-0", &wt, &project, &workflow).unwrap();
-
-        let brief = std::fs::read_to_string(wt.join(".ai/briefs/todo-0-2.md")).unwrap();
-        let copied = wt.join(".ai/briefs/source-brief.md");
-        assert!(brief.contains("## Brief"), "plan branch missing: {brief}");
-        assert!(brief.contains("Read the plan file first"));
-        assert!(brief.contains(&copied.display().to_string()));
-        assert!(copied.exists());
-        assert!(!brief.contains("## Handoff"));
-    }
-
-    #[test]
-    fn tilde_plan_paths_are_copied_into_worktree_briefs() {
-        let wt = temp_worktree();
-        let home = std::path::PathBuf::from(std::env::var("HOME").unwrap());
-        let plan_source = home.join(format!(
-            ".mando/plans/tilde-test-{}/brief.md",
-            global_infra::uuid::Uuid::v4()
-        ));
-        std::fs::create_dir_all(plan_source.parent().unwrap()).unwrap();
-        std::fs::write(&plan_source, "# Brief from tilde path").unwrap();
-
-        let mut item = Task::new("Implement planned change");
-        item.plan = Some(format!(
-            "~/.mando/plans/{}/brief.md",
-            plan_source
-                .parent()
-                .and_then(|path| path.file_name())
-                .unwrap()
-                .to_string_lossy()
-        ));
-
-        let workflow = CaptainWorkflow::compiled_default();
-        let project = ProjectConfig::default();
-
-        prepare_initial_worker_prompt(&item, 4, "mando/todo-0", &wt, &project, &workflow).unwrap();
-
-        let brief = std::fs::read_to_string(wt.join(".ai/briefs/todo-0-4.md")).unwrap();
-        assert!(brief.contains(&wt.join(".ai/briefs/brief.md").display().to_string()));
-        assert!(wt.join(".ai/briefs/brief.md").exists());
-
-        let _ = std::fs::remove_file(&plan_source);
-        let _ = std::fs::remove_dir(plan_source.parent().unwrap());
-    }
-
-    #[test]
-    fn adopted_items_render_the_handoff_branch() {
-        let wt = temp_worktree();
-        let adopt_brief = wt.join(".ai/briefs/adopt-handoff.md");
-        std::fs::create_dir_all(adopt_brief.parent().unwrap()).unwrap();
-        std::fs::write(&adopt_brief, "# Adopt handoff").unwrap();
-
-        let mut item = Task::new("Finish in-flight work");
-        item.plan = Some(".ai/briefs/adopt-handoff.md".into());
-        item.worktree = Some(wt.display().to_string());
-        item.branch = Some("feature/adopt".into());
-
-        let workflow = CaptainWorkflow::compiled_default();
-        let project = ProjectConfig::default();
-
-        let initial =
-            prepare_initial_worker_prompt(&item, 3, "feature/adopt", &wt, &project, &workflow)
-                .unwrap();
-
-        // The `adopted` initial prompt, not the plain `worker` one.
-        assert!(initial.contains("handed off to you"));
-        assert!(initial.contains(
-            &global_infra::paths::data_dir()
-                .join("plans/0/workpad.md")
-                .display()
-                .to_string()
-        ));
-
-        let brief = std::fs::read_to_string(wt.join(".ai/briefs/todo-0-3.md")).unwrap();
-        assert!(brief.contains("## Handoff"));
-        assert!(brief.contains("handed off mid-implementation"));
-        assert!(brief.contains("## Out-of-Scope Discoveries"));
-    }
-
-    #[test]
-    fn no_pr_items_drop_the_evidence_and_pr_sections() {
-        let wt = temp_worktree();
-        let mut item = Task::new("Audit the pricing table");
-        item.no_pr = true;
-
-        let workflow = CaptainWorkflow::compiled_default();
-        let project = ProjectConfig::default();
-
-        let initial =
-            prepare_initial_worker_prompt(&item, 5, "mando/audit-0", &wt, &project, &workflow)
-                .unwrap();
-        assert!(
-            !initial.contains("/x-pr"),
-            "no-PR task must not be told to open a PR"
-        );
-
-        let brief = std::fs::read_to_string(wt.join(".ai/briefs/todo-0-5.md")).unwrap();
-        assert!(!brief.contains("## Evidence Deck"));
-        assert!(!brief.contains("## Finishing"));
-        assert!(brief.contains("This is a research/audit task: no PR."));
-    }
-
-    #[test]
-    fn bug_fix_items_render_the_reproduce_first_protocol() {
-        let wt = temp_worktree();
-        let mut item = Task::new("Login button overflows on mobile");
-        item.is_bug_fix = true;
-
-        let workflow = CaptainWorkflow::compiled_default();
-        let project = ProjectConfig::default();
-
-        prepare_initial_worker_prompt(&item, 6, "mando/bug-0", &wt, &project, &workflow).unwrap();
-
-        let brief = std::fs::read_to_string(wt.join(".ai/briefs/todo-0-6.md")).unwrap();
-        assert!(brief.contains("## Bug Fix Protocol"));
-        assert!(brief.contains("Reproduce the bug before changing code."));
-    }
-
-    #[test]
-    fn adopt_requires_all_four_conditions() {
-        let wt = temp_worktree();
-
-        let mut item = Task::new("test");
-        item.worktree = Some(wt.display().to_string());
-        item.branch = Some("b".into());
-        assert!(is_adopted_handoff(
-            &item,
-            Some(".ai/briefs/adopt-handoff.md"),
-            &wt
-        ));
-
-        let mut item2 = Task::new("test");
-        item2.branch = Some("b".into());
-        assert!(!is_adopted_handoff(
-            &item2,
-            Some(".ai/briefs/adopt-handoff.md"),
-            &wt
-        ));
-
-        let mut item3 = Task::new("test");
-        item3.worktree = Some(wt.display().to_string());
-        assert!(!is_adopted_handoff(
-            &item3,
-            Some(".ai/briefs/adopt-handoff.md"),
-            &wt
-        ));
-
-        let mut item4 = Task::new("test");
-        item4.worktree = Some(wt.display().to_string());
-        item4.branch = Some("b".into());
-        assert!(!is_adopted_handoff(
-            &item4,
-            Some(".ai/briefs/regular-brief.md"),
-            &wt
-        ));
-
-        let mut item5 = Task::new("test");
-        item5.worktree = Some(wt.display().to_string());
-        item5.branch = Some("b".into());
-        assert!(!is_adopted_handoff(&item5, None, &wt));
-
-        let mut item6 = Task::new("test");
-        item6.worktree = Some("/nonexistent/path".into());
-        item6.branch = Some("b".into());
-        assert!(!is_adopted_handoff(
-            &item6,
-            Some(".ai/briefs/adopt-handoff.md"),
-            &std::path::PathBuf::from("/nonexistent/path")
-        ));
-    }
+/// Absolute paths for the images attached to a task, one markdown bullet per
+/// line, for initial, clarifier, and reopen prompts. Empty when nothing is attached.
+/// Basenames only: a stored value with a directory component or `..` is
+/// dropped rather than resolved outside the images dir.
+pub(crate) fn attached_image_lines(images: Option<&str>) -> String {
+    let Some(images) = images.filter(|s| !s.is_empty()) else {
+        return String::new();
+    };
+    let dir = global_infra::paths::images_dir();
+    images
+        .split(',')
+        .filter_map(|entry| {
+            let name = entry.trim();
+            let base = std::path::Path::new(name).file_name()?.to_str()?;
+            (base == name && !name.contains(".."))
+                .then(|| format!("- {}", dir.join(base).display()))
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }

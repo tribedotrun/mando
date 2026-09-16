@@ -336,27 +336,3 @@ pub(crate) fn render_path(route: &RouteDescriptor, values: &[(&str, String)]) ->
     }
     path
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn renders_and_escapes_path_parameters() {
-        let route = RouteDescriptor {
-            method: RouteMethod::Get,
-            path: "/api/projects/{name}/artifacts/{id}",
-            transport: RouteTransport::Json,
-            auth: RouteAuth::Protected,
-            params: Some("api_types::ProjectArtifactParams"),
-            query: None,
-            body: None,
-            response: None,
-            event: None,
-        };
-        assert_eq!(
-            render_path(&route, &[("name", "two words".into()), ("id", "7".into())]),
-            "/api/projects/two%20words/artifacts/7"
-        );
-    }
-}

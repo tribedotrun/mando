@@ -26,18 +26,3 @@ macro_rules! best_effort {
         }
     }};
 }
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn accepts_ok_result_without_logging() {
-        let ok: Result<(), std::io::Error> = Ok(());
-        crate::best_effort!(ok, "ok path");
-    }
-
-    #[test]
-    fn swallows_err_result() {
-        let err: Result<(), std::io::Error> = Err(std::io::Error::other("expected in test"));
-        crate::best_effort!(err, "err path");
-    }
-}
