@@ -1,4 +1,5 @@
-//! Codex-specific credential routes — add, pick, sync, and reset credits.
+//! Codex-specific credential routes — add, pick, sync, reset credits, and
+//! usage warm-up.
 //!
 //! List / probe / delete paths in `routes_credentials.rs` handle Codex rows
 //! transparently because the row carries `provider`. Routes here cover
@@ -52,7 +53,7 @@ pub(crate) fn codex_credential_routes() -> ApiRouter<AppState> {
         params = api_types::CredentialIdParams,
         res = api_types::AddCodexCredentialResponse
     );
-    crate::api_route!(
+    let router = crate::api_route!(
         router,
         GET "/api/credentials/codex/{id}/reset-credits",
         transport = Json,
@@ -60,7 +61,68 @@ pub(crate) fn codex_credential_routes() -> ApiRouter<AppState> {
         handler = get_codex_reset_credits,
         params = api_types::CredentialIdParams,
         res = api_types::CodexResetCreditsResponse
+    );
+    crate::api_route!(
+        router,
+        POST "/api/credentials/codex/{id}/warmup",
+        transport = Json,
+        auth = Protected,
+        handler = warm_codex_credential,
+        body = api_types::EmptyRequest,
+        params = api_types::CredentialIdParams,
+        res = api_types::CodexWarmupResponse
     )
+}
+
+/// POST /api/credentials/codex/:id/warmup — run one throwaway `codex exec`
+/// prompt on the credential so its rolling rate-limit windows start now.
+/// The usage poller does this automatically for idle credentials; this
+/// route is the manual trigger.
+async fn warm_codex_credential(
+    State(state): State<AppState>,
+    axum::extract::Path(api_types::CredentialIdParams { id }): axum::extract::Path<
+        api_types::CredentialIdParams,
+    >,
+    Json(_body): Json<api_types::EmptyRequest>,
+) -> Result<Json<api_types::CodexWarmupResponse>, ApiError> {
+    match state.settings.warm_codex_credential(id).await {
+        Ok(report) => {
+            state.bus.send(global_bus::BusPayload::Credentials(None));
+            Ok(Json(api_types::CodexWarmupResponse {
+                ok: true,
+                id: report.id,
+                label: report.label,
+                warmed_at: report.warmed_at,
+                model: report.model,
+                elapsed_ms: report.elapsed_ms,
+                tokens_rotated: report.tokens_rotated,
+            }))
+        }
+        Err(CodexCredentialError::NotFound(id)) => Err(error_response(
+            StatusCode::NOT_FOUND,
+            &format!("credential id={id} not found"),
+        )),
+        Err(CodexCredentialError::NotCodex) => Err(error_response(
+            StatusCode::BAD_REQUEST,
+            "credential is not a Codex row",
+        )),
+        Err(CodexCredentialError::NoAccountId) => Err(error_response(
+            StatusCode::BAD_REQUEST,
+            "Codex credential has no account_id",
+        )),
+        Err(e @ CodexCredentialError::NotUsable(_)) => {
+            Err(error_response(StatusCode::CONFLICT, &e.to_string()))
+        }
+        Err(CodexCredentialError::Warmup(e)) => Err(internal_error_with(
+            StatusCode::BAD_GATEWAY,
+            &e,
+            &format!("Codex warm-up prompt failed: {e}"),
+        )),
+        Err(e) => Err(internal_error(
+            anyhow::Error::msg(e.to_string()),
+            "failed to warm up Codex credential",
+        )),
+    }
 }
 
 /// GET /api/credentials/codex/:id/reset-credits — return available Codex

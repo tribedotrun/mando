@@ -1,5 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { apiDeleteRouteR, apiGetRouteR, apiPostRouteR } from '#renderer/global/providers/http';
+import {
+  apiDeleteRouteR,
+  apiGetRouteR,
+  apiPostRouteR,
+  apiPatchRouteR,
+} from '#renderer/global/providers/http';
 import { toReactQuery } from '#result';
 import { queryKeys } from '#renderer/global/repo/queryKeys';
 import { daemonSyncMeta } from '#renderer/global/repo/syncPolicy';
@@ -77,6 +82,19 @@ export function useCredentialReveal() {
   return useMutation({
     mutationFn: (id: number) =>
       toReactQuery(apiGetRouteR('getCredentialsByIdToken', { params: { id } })),
+  });
+}
+
+export function useCredentialCliEligibility() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, cliEligible }: { id: number; cliEligible: boolean }) =>
+      toReactQuery(
+        apiPatchRouteR('patchCredentialsByIdClieligibility', { cliEligible }, { params: { id } }),
+      ),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: QUERY_KEY });
+    },
   });
 }
 

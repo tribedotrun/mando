@@ -65,7 +65,7 @@ pub(super) async fn resume_worker(
     }
 
     let (mut env, credential_id) =
-        super::spawner::credential_env_for_session(pool, session_id).await;
+        super::spawner::credential_env_for_session(pool, session_id).await?;
     env.insert("MANDO_TASK_ID".to_string(), item.id.to_string());
     let (pid, _stream_path) = crate::io::process_manager::resume_worker_process(
         prompt, cwd, run.model, run.effort, session_id, &env,

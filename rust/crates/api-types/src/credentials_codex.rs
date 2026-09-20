@@ -27,6 +27,28 @@ pub struct CodexCredentialDetails {
     pub plan_type: Option<String>,
     pub credits_balance: Option<String>,
     pub credits_unlimited: bool,
+    /// Unix seconds of the last usage warm-up (a throwaway `codex exec`
+    /// prompt that starts the idle credential's rolling rate-limit windows),
+    /// when one has run.
+    pub warmup_at: Option<i64>,
+}
+
+/// POST /api/credentials/codex/{id}/warmup — fire one throwaway prompt on
+/// the credential so its rolling rate-limit windows start counting now.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CodexWarmupResponse {
+    pub ok: bool,
+    pub id: i64,
+    pub label: String,
+    /// Unix seconds when the warm-up finished.
+    pub warmed_at: i64,
+    /// Model the prompt ran on.
+    pub model: Option<String>,
+    pub elapsed_ms: u64,
+    /// True when Codex rotated the OAuth tokens during the run and the
+    /// rotated pair was synced back into the credential.
+    pub tokens_rotated: bool,
 }
 
 /// One available Codex rate-limit reset credit.

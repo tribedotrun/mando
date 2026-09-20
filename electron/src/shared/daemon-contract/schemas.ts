@@ -221,6 +221,39 @@ export const clarifyResponseSchema = z
 export const classifyRuleSchema = z
   .object({ category: z.string(), patterns: z.array(z.string()) })
   .strict();
+export const claudeDesktopProfileAdoptRequestSchema = z
+  .object({ credentialId: z.number(), userDataDir: z.string() })
+  .strict();
+export const claudeDesktopProfileRequestSchema = z.object({ credentialId: z.number() }).strict();
+export const claudeDesktopProfileStateSchema = z.enum([
+  'unconfigured',
+  'login_required',
+  'ready',
+  'account_changed',
+]);
+export const claudeDesktopProfileStatusSchema = z
+  .object({
+    credentialId: z.number(),
+    userDataDir: z.string(),
+    sharedClaudeDir: z.string(),
+    accountUuid: z.string().nullable(),
+    expectedAccountUuid: z.string().nullable(),
+    state: z.lazy(() => claudeDesktopProfileStateSchema),
+    running: z.boolean(),
+  })
+  .strict();
+export const claudeDesktopSessionImportRequestSchema = z
+  .object({ credentialId: z.number(), range: z.lazy(() => claudeDesktopSessionRangeSchema) })
+  .strict();
+export const claudeDesktopSessionRangeSchema = z.enum(['week', 'month', 'all']);
+export const claudeDesktopSessionSyncResponseSchema = z
+  .object({
+    imported: z.number(),
+    eligible: z.number(),
+    skipped: z.number(),
+    journalPath: z.string().nullable(),
+  })
+  .strict();
 export const claudeProgressKindSchema = z.enum([
   'task_started',
   'task_notification',
@@ -264,6 +297,7 @@ export const codexCredentialDetailsSchema = z
     planType: z.string().nullable(),
     creditsBalance: z.string().nullable(),
     creditsUnlimited: z.boolean(),
+    warmupAt: z.number().nullable(),
   })
   .strict();
 export const codexCredentialPickSchema = z
@@ -334,6 +368,17 @@ export const codexResetCreditsResponseSchema = z
     credits: z.array(z.lazy(() => codexResetCreditSchema)),
   })
   .strict();
+export const codexWarmupResponseSchema = z
+  .object({
+    ok: z.boolean(),
+    id: z.number(),
+    label: z.string(),
+    warmedAt: z.number(),
+    model: z.string().nullable(),
+    elapsedMs: z.number(),
+    tokensRotated: z.boolean(),
+  })
+  .strict();
 export const configPayloadSchema = z
   .object({ ts: z.number(), data: z.lazy(() => mandoConfigSchema).nullable() })
   .strict();
@@ -390,6 +435,7 @@ export const credentialInfoSchema = z
     isExpired: z.boolean(),
     isRateLimited: z.boolean(),
     isDisabled: z.boolean(),
+    cliEligible: z.boolean(),
     fiveHour: z
       .lazy(() => credentialWindowInfoSchema)
       .nullable()
@@ -2033,6 +2079,9 @@ export const unknownEventSchema = z
   })
   .strict();
 export const updateCodexCredentialAuthRequestSchema = z.object({ authJson: z.string() }).strict();
+export const updateCredentialCliEligibilityRequestSchema = z
+  .object({ cliEligible: z.boolean() })
+  .strict();
 export const updateCredentialTokenRequestSchema = z.object({ token: z.string() }).strict();
 export const updateCredentialTokenResponseSchema = z
   .object({ ok: z.boolean(), id: z.number(), label: z.string() })
@@ -2172,6 +2221,7 @@ export const resSchemas = {
   getConfigStatus: configStatusResponseSchema,
   getCredentials: credentialsListResponseSchema,
   getCredentialsByIdToken: credentialTokenResponseSchema,
+  getCredentialsClaudeDesktopStatus: claudeDesktopProfileStatusSchema,
   getCredentialsCodexAppStatus: codexDesktopAppStatusResponseSchema,
   getCredentialsCodexByIdResetcredits: codexResetCreditsResponseSchema,
   getCredentialsCodexLoginCurrent: codexLoginStatusResponseSchema,
@@ -2203,6 +2253,7 @@ export const resSchemas = {
   getWorkbenches: workbenchesResponseSchema,
   getWorkers: workersResponseSchema,
   getWorktrees: worktreeListResponseSchema,
+  patchCredentialsByIdClieligibility: credentialMutationResponseSchema,
   patchProjectsByName: projectUpsertResponseSchema,
   patchScoutItemsById: boolOkResponseSchema,
   patchTasksById: boolOkResponseSchema,
@@ -2219,10 +2270,16 @@ export const resSchemas = {
   postCredentialsByIdEnable: credentialMutationResponseSchema,
   postCredentialsByIdProbe: probeCredentialResponseSchema,
   postCredentialsByIdToken: updateCredentialTokenResponseSchema,
+  postCredentialsClaudeDesktopAdopt: claudeDesktopProfileStatusSchema,
+  postCredentialsClaudeDesktopOpen: claudeDesktopProfileStatusSchema,
+  postCredentialsClaudeDesktopPreviewsessions: claudeDesktopSessionSyncResponseSchema,
+  postCredentialsClaudeDesktopSetup: claudeDesktopProfileStatusSchema,
+  postCredentialsClaudeDesktopSyncsessions: claudeDesktopSessionSyncResponseSchema,
   postCredentialsCodex: addCodexCredentialResponseSchema,
   postCredentialsCodexAppRestore: codexDesktopAppOperationResponseSchema,
   postCredentialsCodexAppUse: codexDesktopAppOperationResponseSchema,
   postCredentialsCodexByIdAuth: addCodexCredentialResponseSchema,
+  postCredentialsCodexByIdWarmup: codexWarmupResponseSchema,
   postCredentialsCodexLoginCancel: cancelCodexLoginResponseSchema,
   postCredentialsCodexLoginStart: startCodexLoginResponseSchema,
   postCredentialsCodexPick: codexCredentialPickResponseSchema,
@@ -2273,6 +2330,7 @@ export const eventSchemas = {
 } as const;
 export const bodySchemas = {
   deleteTasks: taskDeleteRequestSchema,
+  patchCredentialsByIdClieligibility: updateCredentialCliEligibilityRequestSchema,
   patchProjectsByName: editProjectRequestSchema,
   patchScoutItemsById: scoutLifecycleCommandRequestSchema,
   patchTasksById: taskPatchRequestSchema,
@@ -2289,10 +2347,16 @@ export const bodySchemas = {
   postCredentialsByIdEnable: emptyRequestSchema,
   postCredentialsByIdProbe: emptyRequestSchema,
   postCredentialsByIdToken: updateCredentialTokenRequestSchema,
+  postCredentialsClaudeDesktopAdopt: claudeDesktopProfileAdoptRequestSchema,
+  postCredentialsClaudeDesktopOpen: claudeDesktopProfileRequestSchema,
+  postCredentialsClaudeDesktopPreviewsessions: claudeDesktopSessionImportRequestSchema,
+  postCredentialsClaudeDesktopSetup: claudeDesktopProfileRequestSchema,
+  postCredentialsClaudeDesktopSyncsessions: claudeDesktopSessionImportRequestSchema,
   postCredentialsCodex: addCodexCredentialRequestSchema,
   postCredentialsCodexAppRestore: codexDesktopAppRestoreRequestSchema,
   postCredentialsCodexAppUse: codexDesktopAppUseRequestSchema,
   postCredentialsCodexByIdAuth: updateCodexCredentialAuthRequestSchema,
+  postCredentialsCodexByIdWarmup: emptyRequestSchema,
   postCredentialsCodexLoginCancel: emptyRequestSchema,
   postCredentialsCodexLoginStart: startCodexLoginRequestSchema,
   postCredentialsCodexPick: credentialPickRequestSchema,
@@ -2338,6 +2402,7 @@ export const bodySchemas = {
   putConfig: mandoConfigSchema,
 } as const;
 export const querySchemas = {
+  getCredentialsClaudeDesktopStatus: claudeDesktopProfileRequestSchema,
   getCredentialsCodexAppStatus: codexDesktopAppStatusQuerySchema,
   getScoutItems: scoutQuerySchema,
   getSessions: sessionsQuerySchema,
@@ -2376,6 +2441,7 @@ export const paramsSchemas = {
   getTasksByIdPrsummary: taskIdParamsSchema,
   getTasksByIdSessions: taskIdParamsSchema,
   getTasksByIdTimeline: taskIdParamsSchema,
+  patchCredentialsByIdClieligibility: credentialIdParamsSchema,
   patchProjectsByName: projectNameParamsSchema,
   patchScoutItemsById: scoutItemIdParamsSchema,
   patchTasksById: taskIdParamsSchema,
@@ -2385,6 +2451,7 @@ export const paramsSchemas = {
   postCredentialsByIdProbe: credentialIdParamsSchema,
   postCredentialsByIdToken: credentialIdParamsSchema,
   postCredentialsCodexByIdAuth: credentialIdParamsSchema,
+  postCredentialsCodexByIdWarmup: credentialIdParamsSchema,
   postScoutItemsByIdAct: scoutItemIdParamsSchema,
   postScoutItemsByIdTelegraph: scoutItemIdParamsSchema,
   postTasksByIdClarify: taskIdParamsSchema,

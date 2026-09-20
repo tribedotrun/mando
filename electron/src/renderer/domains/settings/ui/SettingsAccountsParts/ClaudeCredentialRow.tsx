@@ -8,6 +8,9 @@ import {
 } from '#renderer/domains/settings/ui/SettingsAccountsParts';
 import { CredentialUsage } from '#renderer/domains/settings/ui/CredentialUsage';
 import type { CredentialInfo } from '#renderer/domains/settings/runtime/hooks';
+import { Switch } from '#renderer/global/ui/primitives/switch';
+import { useCredentialCliEligibility } from '#renderer/domains/settings/runtime/useFeedbackCredentials';
+import { ClaudeDesktopProfileControls } from '#renderer/domains/settings/ui/SettingsAccountsParts/ClaudeDesktopProfileControls';
 
 interface ClaudeCredentialRowProps {
   cred: CredentialInfo;
@@ -25,6 +28,7 @@ export function ClaudeCredentialRow({
   setDisabledPending,
 }: ClaudeCredentialRowProps): React.ReactElement {
   const [showTokenEditor, setShowTokenEditor] = useState(false);
+  const cliEligibility = useCredentialCliEligibility();
 
   return (
     <div className="rounded-lg border border-border bg-background px-4 py-3">
@@ -47,6 +51,17 @@ export function ClaudeCredentialRow({
         />
       </div>
       <CredentialUsage cred={cred} />
+      <label className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
+        <Switch
+          size="sm"
+          aria-label={`Use ${cred.label} for CLI`}
+          checked={cred.cliEligible}
+          disabled={cliEligibility.isPending}
+          onCheckedChange={(cliEligible) => cliEligibility.mutate({ id: cred.id, cliEligible })}
+        />
+        Use for CLI and worker load balancing
+      </label>
+      <ClaudeDesktopProfileControls credentialId={cred.id} />
       {showTokenEditor ? (
         <UpdateCredentialTokenForm
           credentialId={cred.id}

@@ -179,20 +179,20 @@ pub struct SpawnResult {
 pub(crate) async fn credential_env_for_session(
     pool: &sqlx::SqlitePool,
     _session_id: &str,
-) -> (std::collections::HashMap<String, String>, Option<i64>) {
+) -> Result<(std::collections::HashMap<String, String>, Option<i64>)> {
     let mut env = std::collections::HashMap::new();
     // Prefer a freshly-picked healthy credential (pick_for_worker filters out
     // rate-limited ones). This ensures we rotate away from a rate-limited
     // credential on resume. Balancing is over the single global pool.
-    let fresh = super::tick_spawn::pick_credential(pool).await;
+    let fresh = super::tick_spawn::pick_credential(pool).await?;
     if let Some((cid, token)) = fresh {
         env.insert("CLAUDE_CODE_OAUTH_TOKEN".into(), token);
-        return (env, Some(cid));
+        return Ok((env, Some(cid)));
     }
     // No credentials configured -- fall through to ambient login.
     // (If all credentials are rate-limited, the tick spawn gate blocks the
     // reopen before reaching here.)
-    (env, None)
+    Ok((env, None))
 }
 
 fn branch_slot(branch: &str) -> Option<u64> {

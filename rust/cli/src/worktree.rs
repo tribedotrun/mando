@@ -68,19 +68,14 @@ async fn handle_open(name: Option<String>, project: Option<String>) -> anyhow::R
         .status()
         .is_ok();
     if claude_available {
-        // Pull a credential from the daemon pool. Best-effort: on any
-        // failure (transport error, no usable credential), fall through to
-        // ambient ~/.claude/ login — mirrors the `mando credentials pick`
-        // shell wrapper semantics so the spawn behaves the same whether
-        // the user runs `mando worktree open` directly or via the wrapper.
+        // Only an unconfigured pool permits ambient login; selection errors stop launch.
         let credential = client
             .post_credentials_pick(&api_types::CredentialPickRequest {
                 id: None,
                 label: None,
             })
-            .await
-            .ok()
-            .and_then(|r| r.pick);
+            .await?
+            .pick;
 
         eprintln!("Launching claude...");
         let mut cmd = std::process::Command::new("claude");

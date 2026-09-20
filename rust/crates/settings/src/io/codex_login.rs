@@ -283,7 +283,7 @@ async fn finish(
 /// callback port forever (its browser flow never times out). The spawn's
 /// `pre_exec` calls `setsid()`, so the child is its own process-group
 /// leader and `kill(-pid, SIGKILL)` reaches the grandchildren too.
-async fn kill_and_reap(child: &mut Child) {
+pub(crate) async fn kill_and_reap(child: &mut Child) {
     #[cfg(unix)]
     match child.id() {
         Some(pid) => {

@@ -237,8 +237,9 @@ async fn run_workbench_cleanup(pool: &sqlx::SqlitePool) -> anyhow::Result<()> {
 pub(super) fn spawn_credential_usage_poll(runtime: &CaptainRuntime) {
     let pool = runtime.pool().clone();
     let bus = runtime.bus().clone();
+    let settings = runtime.settings().clone();
     let cancel = runtime.cancellation_token().clone();
     runtime.task_tracker().spawn(async move {
-        crate::runtime::credential_usage_poll::run(pool, bus, cancel).await;
+        crate::runtime::credential_usage_poll::run(pool, bus, settings, cancel).await;
     });
 }

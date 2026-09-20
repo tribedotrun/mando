@@ -35,29 +35,32 @@ const PRE_SPAWN_STALE_SECS: i64 = 3 * 60 * 60;
 /// When the chosen credential's last probe is older than
 /// [`PRE_SPAWN_STALE_SECS`] this also fires a fresh probe. A `Rejected`
 /// probe result trips the existing rate-limit cooldown path and the
-/// function re-picks, returning `None` if no healthy credential remains.
+/// function re-picks. A configured but unavailable pool returns an error.
 #[tracing::instrument(skip_all)]
-pub async fn pick_credential(pool: &sqlx::SqlitePool) -> Option<(i64, String)> {
+pub async fn pick_credential(pool: &sqlx::SqlitePool) -> Result<Option<(i64, String)>> {
+    let pick = pick_credential_probed(pool).await?;
+    if pick.is_none() && settings::credentials::has_any(pool).await? {
+        anyhow::bail!("No CLI-eligible Claude credential is available");
+    }
+    Ok(pick)
+}
+
+#[tracing::instrument(skip_all)]
+pub(super) async fn pick_credential_probed(
+    pool: &sqlx::SqlitePool,
+) -> Result<Option<(i64, String)>> {
     // Up to 2 pick attempts: if the first pick probes out as `Rejected`,
     // that credential enters cooldown and we try once more.
     let mut any_rejected = false;
     for _ in 0..2 {
-        let picked = match settings::credentials::pick_for_worker(pool).await {
-            Ok(pick) => pick,
-            Err(e) => {
-                tracing::warn!(
-                    module = "credentials",
-                    error = %e,
-                    "failed to pick credential"
-                );
-                return None;
-            }
+        let Some((id, token)) = settings::credentials::pick_for_worker(pool).await? else {
+            return Ok(None);
         };
-        let (id, token) = picked?;
         let now_secs = time::OffsetDateTime::now_utc().unix_timestamp();
         let row = match settings::credentials::get_row_by_id(pool, id).await {
             Ok(Some(row)) => row,
-            _ => return Some((id, token)),
+            Ok(None) => continue,
+            Err(error) => return Err(error),
         };
         let needs_probe = row
             .last_probed_at
@@ -66,7 +69,7 @@ pub async fn pick_credential(pool: &sqlx::SqlitePool) -> Option<(i64, String)> {
                 .rate_limit_cooldown_until
                 .is_some_and(|until| until > 0 && until <= now_secs);
         if !needs_probe {
-            return Some((id, token));
+            return Ok(Some((id, token)));
         }
         match super::credential_usage_poll::probe_and_persist(pool, &row).await {
             Ok(snapshot)
@@ -85,7 +88,7 @@ pub async fn pick_credential(pool: &sqlx::SqlitePool) -> Option<(i64, String)> {
                 // so the next pick_for_worker excludes this credential.
                 continue;
             }
-            Ok(_) => return Some((id, token)),
+            Ok(_) => return Ok(Some((id, token))),
             Err(settings::usage_probe::ProbeError::RateLimited { .. }) => {
                 any_rejected = true;
                 continue;
@@ -113,21 +116,19 @@ pub async fn pick_credential(pool: &sqlx::SqlitePool) -> Option<(i64, String)> {
                     error = %e,
                     "pre-spawn probe transient failure; using stale pick"
                 );
-                return Some((id, token));
+                return Ok(Some((id, token)));
             }
         }
     }
     // Loop exhausted without returning: every healthy candidate probed as
-    // Rejected. Surface it so operators can tell "all rate-limited" from
-    // "no credentials configured" (both currently return None, which the
-    // caller treats as "fall back to ambient login").
+    // Rejected. The caller distinguishes an exhausted pool from ambient login.
     if any_rejected {
         tracing::warn!(
             module = "credentials",
-            "pick_credential found all candidates rejected; falling back to ambient login"
+            "pick_credential found all candidates rejected; no eligible credential remains"
         );
     }
-    None
+    Ok(None)
 }
 
 #[tracing::instrument(skip_all)]

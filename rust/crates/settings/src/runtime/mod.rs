@@ -12,6 +12,8 @@ mod codex_pick_explicit;
 mod codex_pick_helpers;
 mod codex_pick_refresh;
 mod codex_reset_credits_runtime;
+mod codex_warmup_policy;
+mod codex_warmup_runtime;
 mod credentials_runtime;
 mod runtime_helpers;
 mod settings_runtime;
@@ -21,4 +23,9 @@ pub use codex_credentials_runtime::{
     CodexCredentialError, CodexPickOutcome, PickedCodexCredential,
 };
 pub use codex_login_runtime::StartedCodexLogin;
-pub use settings_runtime::{ApplyConfigError, SettingsRuntime};
+pub use codex_warmup_policy::{codex_warmup_due, CODEX_WARMUP_MIN_INTERVAL_SECS};
+pub use codex_warmup_runtime::CodexWarmupReport;
+pub use settings_runtime::{ApplyConfigError, SettingsError, SettingsRuntime};
+
+mod claude_desktop_runtime;
+pub use claude_desktop_runtime::ClaudeDesktopProfileError;

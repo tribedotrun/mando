@@ -35,12 +35,16 @@ export function ClaudeCredentialsSection({
       <div>
         <h3 className="text-sm font-semibold text-foreground">Claude</h3>
         <p className="mt-1 text-xs text-muted-foreground">
-          Additional Claude Code credentials for worker load balancing. When no credentials are
-          configured, workers use your current Claude Code login.
+          Pool Claude accounts across CLI workers and Desktop. Choose which accounts participate in
+          CLI load balancing; each Desktop login shares your local Claude files and memory.
         </p>
         <p className="mt-1 text-xs text-muted-foreground">
           Available credentials nearest their weekly reset are used first. Usage refreshes every
           three hours; use a credential’s refresh button to update it sooner.
+        </p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Local session import is optional under Manage. Opening Desktop does not import sessions.
+          Cloud history stays with its account; Desktop requests are not automatically rotated.
         </p>
       </div>
       <Card className="py-4">

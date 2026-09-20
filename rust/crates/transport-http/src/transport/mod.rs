@@ -32,3 +32,5 @@ pub mod server_routes_core;
 pub mod server_routes_features;
 pub mod sse;
 pub mod sse_session_events;
+
+pub mod routes_credentials_claude_desktop;

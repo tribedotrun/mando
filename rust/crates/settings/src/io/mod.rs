@@ -7,6 +7,7 @@ pub mod codex_login;
 pub mod codex_oauth_refresh;
 pub mod codex_probe;
 pub mod codex_reset_credits;
+pub mod codex_warmup;
 pub mod config_fs;
 pub mod credential_types;
 pub mod credentials;
@@ -15,3 +16,6 @@ pub mod logo;
 pub mod projects;
 pub mod provider_probe;
 pub mod usage_probe;
+
+pub(crate) mod claude_desktop_profile;
+pub(crate) mod claude_desktop_sessions;

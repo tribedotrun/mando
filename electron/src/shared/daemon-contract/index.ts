@@ -147,6 +147,36 @@ export type ClarifyResponse = {
   error: string | null;
 };
 export type ClassifyRule = { category: string; patterns: Array<string> };
+export type ClaudeDesktopProfileAdoptRequest = { credentialId: number; userDataDir: string };
+export type ClaudeDesktopProfileRequest = { credentialId: number };
+export type ClaudeDesktopProfileState =
+  | 'unconfigured'
+  | 'login_required'
+  | 'ready'
+  | 'account_changed';
+export type ClaudeDesktopProfileStatus = {
+  credentialId: number;
+  userDataDir: string;
+  sharedClaudeDir: string;
+  /**
+   * Last identity recorded by Desktop, not proof that its session is still valid.
+   */
+  accountUuid: string | null;
+  expectedAccountUuid: string | null;
+  state: ClaudeDesktopProfileState;
+  running: boolean;
+};
+export type ClaudeDesktopSessionImportRequest = {
+  credentialId: number;
+  range: ClaudeDesktopSessionRange;
+};
+export type ClaudeDesktopSessionRange = 'week' | 'month' | 'all';
+export type ClaudeDesktopSessionSyncResponse = {
+  imported: number;
+  eligible: number;
+  skipped: number;
+  journalPath: string | null;
+};
 export type ClaudeProgressKind =
   | 'task_started'
   | 'task_notification'
@@ -181,6 +211,12 @@ export type CodexCredentialDetails = {
   planType: string | null;
   creditsBalance: string | null;
   creditsUnlimited: boolean;
+  /**
+   * Unix seconds of the last usage warm-up (a throwaway `codex exec`
+   * prompt that starts the idle credential's rolling rate-limit windows),
+   * when one has run.
+   */
+  warmupAt: number | null;
 };
 export type CodexCredentialPick = {
   id: number;
@@ -249,6 +285,25 @@ export type CodexResetCreditsResponse = {
   totalEarnedCount: number;
   credits: Array<CodexResetCredit>;
 };
+export type CodexWarmupResponse = {
+  ok: boolean;
+  id: number;
+  label: string;
+  /**
+   * Unix seconds when the warm-up finished.
+   */
+  warmedAt: number;
+  /**
+   * Model the prompt ran on; `None` when Codex's own default was used.
+   */
+  model: string | null;
+  elapsedMs: number;
+  /**
+   * True when Codex rotated the OAuth tokens during the run and the
+   * rotated pair was synced back into the credential.
+   */
+  tokensRotated: boolean;
+};
 export type ConfigPayload = { ts: number; data: MandoConfig | null };
 export type ConfigSetupRequest = { config?: MandoConfig };
 export type ConfigSetupResponse = { ok: boolean };
@@ -292,6 +347,7 @@ export type CredentialInfo = {
   isExpired: boolean;
   isRateLimited: boolean;
   isDisabled: boolean;
+  cliEligible: boolean;
   fiveHour?: CredentialWindowInfo | null;
   sevenDay?: CredentialWindowInfo | null;
   /**
@@ -1414,6 +1470,7 @@ export type UpdateCodexCredentialAuthRequest = {
    */
   authJson: string;
 };
+export type UpdateCredentialCliEligibilityRequest = { cliEligible: boolean };
 export type UpdateCredentialTokenRequest = { token: string };
 export type UpdateCredentialTokenResponse = { ok: boolean; id: number; label: string };
 export type UserContentBlock =

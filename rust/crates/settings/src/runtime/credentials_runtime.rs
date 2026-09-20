@@ -127,6 +127,24 @@ impl SettingsRuntime {
     }
 
     #[tracing::instrument(skip_all)]
+    pub async fn set_credential_cli_eligible(
+        &self,
+        id: i64,
+        eligible: bool,
+    ) -> SettingsResult<bool> {
+        let changed = crate::io::credentials::set_cli_eligible(&self.db_pool, id, eligible).await?;
+        if changed {
+            tracing::info!(
+                module = "credentials",
+                id,
+                eligible,
+                "credential CLI eligibility set"
+            );
+        }
+        Ok(changed)
+    }
+
+    #[tracing::instrument(skip_all)]
     pub async fn mark_credential_expired(&self, id: i64) -> SettingsResult<bool> {
         crate::io::credentials::mark_expired(&self.db_pool, id)
             .await
@@ -144,9 +162,11 @@ impl SettingsRuntime {
     /// across every running session on a credential, whatever opened it.
     #[tracing::instrument(skip_all)]
     pub async fn pick_worker_credential(&self) -> SettingsResult<Option<(i64, String)>> {
-        crate::io::credentials::pick_for_worker(&self.db_pool)
-            .await
-            .map_err(Into::into)
+        let pick = crate::io::credentials::pick_for_worker(&self.db_pool).await?;
+        if pick.is_none() && crate::io::credentials::has_any(&self.db_pool).await? {
+            return Err(SettingsError::ClaudeCliUnavailable);
+        }
+        Ok(pick)
     }
 
     #[tracing::instrument(skip_all)]
@@ -207,7 +227,7 @@ impl SettingsRuntime {
         if row.provider != "claude" {
             return Ok(None);
         }
-        if row.disabled_at.is_some() {
+        if row.disabled_at.is_some() || !row.cli_eligible {
             return Ok(None);
         }
         Ok(Some((resolved_id, row.access_token, row.label)))

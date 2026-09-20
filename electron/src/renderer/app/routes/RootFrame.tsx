@@ -8,7 +8,7 @@ import { useMountEffect } from '#renderer/global/runtime/useMountEffect';
 import { useUIStore } from '#renderer/global/runtime/useUIStore';
 import { DevInfoBar } from '#renderer/global/ui/DevInfoBar';
 import { RootShellOverlays } from '#renderer/app/routes/RootShellOverlays';
-import { TAB_ROUTES } from '#renderer/global/service/routeHelpers';
+import { TAB_ROUTES, isSettingsPath } from '#renderer/global/service/routeHelpers';
 import { router } from '#renderer/app/router';
 import type { Tab } from '#renderer/app/Sidebar';
 
@@ -40,7 +40,11 @@ export function RootFrame(): React.ReactElement {
   const openCredentials = useCallback(() => {
     useUIStore.getState().closePalette();
     useUIStore.getState().closeShortcuts();
-    void navigate({ to: '/settings/$section', params: { section: 'credentials' } });
+    void navigate({
+      to: '/settings/$section',
+      params: { section: 'credentials' },
+      replace: isSettingsPath(router.state.location.pathname),
+    });
   }, [navigate]);
 
   // The home navigator lets non-React callers (zustand store, keyboard shortcuts
@@ -70,7 +74,11 @@ export function RootFrame(): React.ReactElement {
     onTogglePalette: useUIStore.getState().togglePalette,
     onOpenSettings: useCallback(() => {
       useUIStore.getState().closePalette();
-      void navigate({ to: '/settings/$section', params: { section: 'general' } });
+      void navigate({
+        to: '/settings/$section',
+        params: { section: 'general' },
+        replace: isSettingsPath(router.state.location.pathname),
+      });
     }, [navigate]),
     onOpenCredentials: openCredentials,
     onToggleShortcuts: useUIStore.getState().toggleShortcuts,
@@ -100,7 +108,11 @@ export function RootFrame(): React.ReactElement {
       if (navMap[action]) {
         void navigate({ to: navMap[action] });
       } else if (action === 'act-settings') {
-        void navigate({ to: '/settings/$section', params: { section: 'general' } });
+        void navigate({
+          to: '/settings/$section',
+          params: { section: 'general' },
+          replace: isSettingsPath(router.state.location.pathname),
+        });
       } else if (action === 'nav-credentials') {
         openCredentials();
       } else if (action === 'act-create-task') {

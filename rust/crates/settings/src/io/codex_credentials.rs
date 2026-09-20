@@ -329,6 +329,20 @@ pub async fn update_codex_plan_and_credits(
     Ok(result.rows_affected() > 0)
 }
 
+/// Stamp the last Codex usage warm-up time (Unix seconds) on a credential.
+pub async fn record_codex_warmup(pool: &SqlitePool, id: i64, warmed_at: i64) -> Result<bool> {
+    let result = sqlx::query(
+        "UPDATE credentials
+         SET codex_warmup_at = ?1, updated_at = datetime('now')
+         WHERE id = ?2 AND provider = 'codex'",
+    )
+    .bind(warmed_at)
+    .bind(id)
+    .execute(pool)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
 /// Look up the credential id for a Codex `account_id`. Used by activation
 /// to compute "currently active" without a stored flag.
 pub async fn find_codex_id_by_account(pool: &SqlitePool, account_id: &str) -> Result<Option<i64>> {

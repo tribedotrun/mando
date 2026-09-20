@@ -4,6 +4,7 @@
 
 mod config;
 mod credentials;
+mod credentials_claude_desktop;
 mod credentials_codex;
 mod events;
 mod extras;
@@ -20,6 +21,7 @@ mod transcript_events;
 
 pub use config::*;
 pub use credentials::*;
+pub use credentials_claude_desktop::*;
 pub use credentials_codex::*;
 pub use events::*;
 pub use extras::*;

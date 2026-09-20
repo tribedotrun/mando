@@ -39,11 +39,10 @@ pub async fn labels_by_ids(pool: &SqlitePool, ids: &[i64]) -> Result<HashMap<i64
 /// kept for compatibility with databases that were migrated while Codex
 /// account credentials existed.
 pub async fn has_any(pool: &SqlitePool) -> Result<bool> {
-    let count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM credentials WHERE provider = 'claude' AND disabled_at IS NULL",
-    )
-    .fetch_one(pool)
-    .await?;
+    let count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM credentials WHERE provider = 'claude'")
+            .fetch_one(pool)
+            .await?;
     Ok(count > 0)
 }
 
@@ -179,6 +178,19 @@ pub async fn set_disabled(pool: &SqlitePool, id: i64, disabled: bool) -> Result<
         return Ok(true);
     }
     Ok(get_row_by_id(pool, id).await?.is_some())
+}
+
+/// Control Claude CLI pool participation independently of Desktop availability.
+pub async fn set_cli_eligible(pool: &SqlitePool, id: i64, eligible: bool) -> Result<bool> {
+    let result = sqlx::query(
+        "UPDATE credentials SET cli_eligible = ?1, updated_at = datetime('now')
+         WHERE id = ?2 AND provider = 'claude'",
+    )
+    .bind(eligible)
+    .bind(id)
+    .execute(pool)
+    .await?;
+    Ok(result.rows_affected() > 0)
 }
 
 /// Set rate-limit cooldown on a credential.
@@ -351,6 +363,7 @@ pub async fn pick_for_worker(pool: &SqlitePool) -> Result<Option<(i64, String)>>
          ) s ON s.credential_id = c.id
          WHERE c.provider = 'claude'
            AND c.disabled_at IS NULL
+           AND c.cli_eligible = 1
            AND (c.expires_at IS NULL OR c.expires_at > ?1)
            AND (c.rate_limit_cooldown_until IS NULL OR c.rate_limit_cooldown_until <= ?2)
          ORDER BY
@@ -365,6 +378,15 @@ pub async fn pick_for_worker(pool: &SqlitePool) -> Result<Option<(i64, String)>>
     .fetch_optional(pool)
     .await?;
     Ok(row)
+}
+
+/// Pick for a new CLI process. Ambient login is allowed only without a managed pool.
+pub async fn pick_for_execution(pool: &SqlitePool) -> Result<Option<(i64, String)>> {
+    let pick = pick_for_worker(pool).await?;
+    if pick.is_none() && has_any(pool).await? {
+        anyhow::bail!("No CLI-eligible Claude credential is available; enable an account for CLI or wait for its allowance to reset");
+    }
+    Ok(pick)
 }
 
 /// Pick an eligible Codex credential whose weekly allowance resets soonest.
@@ -455,6 +477,7 @@ pub async fn earliest_cooldown_remaining_secs(pool: &SqlitePool) -> anyhow::Resu
         "SELECT MIN(rate_limit_cooldown_until) FROM credentials
          WHERE provider = 'claude'
            AND disabled_at IS NULL
+           AND cli_eligible = 1
            AND rate_limit_cooldown_until IS NOT NULL
            AND rate_limit_cooldown_until > ?",
     )

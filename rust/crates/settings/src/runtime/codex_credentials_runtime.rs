@@ -88,6 +88,10 @@ pub enum CodexCredentialError {
     AccountMismatch { expected: String, got: String },
     #[error("failed to persist refreshed tokens: {0}")]
     TokenPersistFailed(String),
+    #[error("codex usage warm-up failed: {0}")]
+    Warmup(#[from] crate::io::codex_warmup::CodexWarmupError),
+    #[error("credential id={0} is not usable right now (disabled, expired, or its token refresh failed)")]
+    NotUsable(i64),
 }
 
 impl SettingsRuntime {

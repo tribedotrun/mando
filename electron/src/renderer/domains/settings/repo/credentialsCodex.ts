@@ -10,6 +10,7 @@ import type {
   CodexLoginStatus,
   CodexLoginStatusResponse,
   CodexResetCreditsResponse,
+  CodexWarmupResponse,
   StartCodexLoginResponse,
 } from '#shared/daemon-contract';
 
@@ -20,6 +21,7 @@ export type {
   CodexLoginStatus,
   CodexLoginStatusResponse,
   CodexResetCreditsResponse,
+  CodexWarmupResponse,
   StartCodexLoginResponse,
 };
 
@@ -45,6 +47,25 @@ export function useCodexResetCredits(id: number, enabled: boolean) {
       toReactQuery(apiGetRouteR('getCredentialsCodexByIdResetcredits', { params: { id } })),
     staleTime: 300_000,
     refetchInterval: enabled ? 300_000 : false,
+  });
+}
+
+/**
+ * Fire one throwaway `codex exec` prompt on the credential so its rolling
+ * rate-limit windows start counting now. The daemon's usage poller does this
+ * automatically for idle credentials; this is the manual trigger.
+ */
+export function useCodexCredentialWarmup() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) =>
+      toReactQuery(apiPostRouteR('postCredentialsCodexByIdWarmup', undefined, { params: { id } })),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: LIST_KEY });
+    },
+    onError: () => {
+      void qc.invalidateQueries({ queryKey: LIST_KEY });
+    },
   });
 }
 
