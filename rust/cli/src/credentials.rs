@@ -4,7 +4,9 @@
 //!
 //! ```sh
 //! claude() {
-//!   eval "$(command mando credentials pick 2>/dev/null)" || true
+//!   local picked
+//!   picked=$(command mando credentials pick) || return $?
+//!   eval "$picked"
 //!   command claude "$@"
 //! }
 //! ```
@@ -42,8 +44,7 @@ pub(crate) enum CredentialsCommand {
         id: i64,
     },
     /// Pick the best-available credential right now and emit shell exports
-    /// (success) or unsets (any fallback path) so `eval "$(mando credentials pick)"`
-    /// always leaves the shell in a correct state.
+    /// or unsets for ambient login. Launchers must check the exit status before eval.
     Pick {
         /// Pick a Codex OAuth credential instead of Claude. Internal plumbing for Codex launchers.
         #[arg(long)]
@@ -184,18 +185,9 @@ async fn handle_set_disabled(id: i64, disabled: bool) -> Result<()> {
 
 async fn handle_pick_claude(request: api_types::CredentialPickRequest) -> Result<()> {
     let explicit = request.id.is_some() || request.label.is_some();
-    let Ok(client) = DaemonClient::discover() else {
-        emit_claude_unset();
-        return Ok(());
-    };
+    let client = DaemonClient::discover()?;
 
-    let result = match client.post_credentials_pick(&request).await {
-        Ok(r) => r,
-        Err(_) => {
-            emit_claude_unset();
-            return Ok(());
-        }
-    };
+    let result = client.post_credentials_pick(&request).await?;
 
     if let Some(pick) = result.pick {
         let token = shell_single_quote(&pick.token);
@@ -207,11 +199,9 @@ async fn handle_pick_claude(request: api_types::CredentialPickRequest) -> Result
     } else {
         emit_claude_unset();
         if explicit {
-            eprintln!("mando: requested Claude credential not found or wrong provider; falling through to ambient login");
+            eprintln!("mando: requested Claude credential is unavailable");
         } else {
-            eprintln!(
-                "mando: no credentials available (none configured, all expired, or all rate-limited); falling through to ambient login"
-            );
+            eprintln!("mando: no managed Claude credentials configured; using ambient login");
         }
     }
     Ok(())

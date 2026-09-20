@@ -74,10 +74,7 @@ impl QaSessionManager {
     ) -> Result<QaResult> {
         self.expire_stale().await;
 
-        let credential = settings::credentials::pick_for_worker(pool)
-            .await
-            .inspect_err(|e| warn!(error = %e, "scout-qa: pick_for_worker failed"))
-            .unwrap_or(None);
+        let credential = settings::credentials::pick_for_execution(pool).await?;
 
         // Try to reuse an existing session.
         if let Some(key) = session_key {

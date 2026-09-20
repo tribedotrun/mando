@@ -50,6 +50,16 @@ pub(crate) fn credential_routes() -> ApiRouter<AppState> {
     );
     let router = crate::api_route!(
         router,
+        PATCH "/api/credentials/{id}/cli-eligibility",
+        transport = Json,
+        auth = Protected,
+        handler = update_cli_eligibility,
+        body = api_types::UpdateCredentialCliEligibilityRequest,
+        params = api_types::CredentialIdParams,
+        res = api_types::CredentialMutationResponse
+    );
+    let router = crate::api_route!(
+        router,
         GET "/api/credentials/{id}/token",
         transport = Json,
         auth = Protected,
@@ -139,6 +149,7 @@ async fn list_credentials(
             is_expired: cred.is_expired,
             is_rate_limited: cred.is_rate_limited,
             is_disabled: cred.is_disabled,
+            cli_eligible: cred.cli_eligible,
             five_hour: cred
                 .five_hour
                 .map(|window| api_types::CredentialWindowInfo {
@@ -169,6 +180,7 @@ async fn list_credentials(
                 plan_type: c.plan_type,
                 credits_balance: c.credits_balance,
                 credits_unlimited: c.credits_unlimited,
+                warmup_at: c.warmup_at,
             }),
         })
         .collect();
@@ -206,6 +218,33 @@ async fn remove_credential(
         }
         Ok(false) => Err(error_response(StatusCode::NOT_FOUND, "not found")),
         Err(e) => Err(internal_error(e, "failed to remove credential")),
+    }
+}
+
+async fn update_cli_eligibility(
+    State(state): State<AppState>,
+    axum::extract::Path(api_types::CredentialIdParams { id }): axum::extract::Path<
+        api_types::CredentialIdParams,
+    >,
+    Json(body): Json<api_types::UpdateCredentialCliEligibilityRequest>,
+) -> Result<Json<api_types::CredentialMutationResponse>, ApiError> {
+    match state
+        .settings
+        .set_credential_cli_eligible(id, body.cli_eligible)
+        .await
+    {
+        Ok(true) => {
+            state.bus.send(global_bus::BusPayload::Credentials(None));
+            Ok(Json(api_types::CredentialMutationResponse {
+                ok: true,
+                error: None,
+            }))
+        }
+        Ok(false) => Err(error_response(
+            StatusCode::NOT_FOUND,
+            "Claude credential not found",
+        )),
+        Err(e) => Err(internal_error(e, "failed to update CLI eligibility")),
     }
 }
 
@@ -342,9 +381,8 @@ async fn probe_credential(
 /// running session on a credential, so terminal use balances against worker
 /// load out of the one global pool.
 ///
-/// Returns `{ pick: null }` (HTTP 200) when nothing is usable — the caller is
-/// expected to fall back to its ambient login rather than treat that as an
-/// error.
+/// Returns `{ pick: null }` only without a managed Claude pool. Unavailable
+/// selections return an error so callers do not bypass CLI eligibility.
 async fn pick_credential(
     State(state): State<AppState>,
     Json(body): Json<api_types::CredentialPickRequest>,
@@ -381,7 +419,13 @@ async fn pick_credential(
             .settings
             .pick_worker_credential()
             .await
-            .map_err(|e| internal_error(e, "failed to pick credential"))?
+            .map_err(|e| match e {
+                settings::SettingsError::ClaudeCliUnavailable => error_response(
+                    StatusCode::CONFLICT,
+                    "No CLI-eligible Claude credential is available; enable an account for CLI or wait for its allowance to reset",
+                ),
+                error => internal_error(error, "failed to pick credential"),
+            })?
         {
             None => None,
             Some((id, token)) => {
@@ -395,6 +439,13 @@ async fn pick_credential(
             }
         }
     };
+
+    if pick.is_none() && (body.id.is_some() || explicit_label.is_some()) {
+        return Err(error_response(
+            StatusCode::CONFLICT,
+            "Requested Claude credential is not available for CLI",
+        ));
+    }
 
     Ok(Json(api_types::CredentialPickResponse { pick }))
 }

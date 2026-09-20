@@ -101,6 +101,12 @@ export const queryKeys = {
     swap: () => ['codexDesktopApp', 'swap'] as const,
   },
 
+  claudeDesktopApp: {
+    all: ['claudeDesktopApp'] as const,
+    status: (credentialId: number) => ['claudeDesktopApp', 'status', credentialId] as const,
+    action: () => ['claudeDesktopApp', 'action'] as const,
+  },
+
   // ── Highlighter ──
   highlighter: {
     all: ['shiki-highlight'] as const,

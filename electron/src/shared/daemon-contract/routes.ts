@@ -121,6 +121,54 @@ export interface Routes {
     auth: 'protected';
     res: Types.CredentialsListResponse;
   };
+  postCredentialsClaudeDesktopAdopt: {
+    method: 'POST';
+    path: '/api/credentials/claude/desktop/adopt';
+    transport: 'json';
+    auth: 'protected';
+    body: Types.ClaudeDesktopProfileAdoptRequest;
+    res: Types.ClaudeDesktopProfileStatus;
+  };
+  postCredentialsClaudeDesktopOpen: {
+    method: 'POST';
+    path: '/api/credentials/claude/desktop/open';
+    transport: 'json';
+    auth: 'protected';
+    body: Types.ClaudeDesktopProfileRequest;
+    res: Types.ClaudeDesktopProfileStatus;
+  };
+  postCredentialsClaudeDesktopPreviewsessions: {
+    method: 'POST';
+    path: '/api/credentials/claude/desktop/preview-sessions';
+    transport: 'json';
+    auth: 'protected';
+    body: Types.ClaudeDesktopSessionImportRequest;
+    res: Types.ClaudeDesktopSessionSyncResponse;
+  };
+  postCredentialsClaudeDesktopSetup: {
+    method: 'POST';
+    path: '/api/credentials/claude/desktop/setup';
+    transport: 'json';
+    auth: 'protected';
+    body: Types.ClaudeDesktopProfileRequest;
+    res: Types.ClaudeDesktopProfileStatus;
+  };
+  getCredentialsClaudeDesktopStatus: {
+    method: 'GET';
+    path: '/api/credentials/claude/desktop/status';
+    transport: 'json';
+    auth: 'protected';
+    query: Types.ClaudeDesktopProfileRequest;
+    res: Types.ClaudeDesktopProfileStatus;
+  };
+  postCredentialsClaudeDesktopSyncsessions: {
+    method: 'POST';
+    path: '/api/credentials/claude/desktop/sync-sessions';
+    transport: 'json';
+    auth: 'protected';
+    body: Types.ClaudeDesktopSessionImportRequest;
+    res: Types.ClaudeDesktopSessionSyncResponse;
+  };
   postCredentialsCodex: {
     method: 'POST';
     path: '/api/credentials/codex';
@@ -209,6 +257,15 @@ export interface Routes {
     params: Types.CredentialIdParams;
     res: Types.CodexResetCreditsResponse;
   };
+  postCredentialsCodexByIdWarmup: {
+    method: 'POST';
+    path: '/api/credentials/codex/{id}/warmup';
+    transport: 'json';
+    auth: 'protected';
+    body: Types.EmptyRequest;
+    params: Types.CredentialIdParams;
+    res: Types.CodexWarmupResponse;
+  };
   postCredentialsPick: {
     method: 'POST';
     path: '/api/credentials/pick';
@@ -230,6 +287,15 @@ export interface Routes {
     path: '/api/credentials/{id}';
     transport: 'json';
     auth: 'protected';
+    params: Types.CredentialIdParams;
+    res: Types.CredentialMutationResponse;
+  };
+  patchCredentialsByIdClieligibility: {
+    method: 'PATCH';
+    path: '/api/credentials/{id}/cli-eligibility';
+    transport: 'json';
+    auth: 'protected';
+    body: Types.UpdateCredentialCliEligibilityRequest;
     params: Types.CredentialIdParams;
     res: Types.CredentialMutationResponse;
   };
@@ -1039,6 +1105,42 @@ export const routes = {
     auth: 'protected',
   },
   getCredentials: { method: 'GET', path: '/api/credentials', transport: 'json', auth: 'protected' },
+  postCredentialsClaudeDesktopAdopt: {
+    method: 'POST',
+    path: '/api/credentials/claude/desktop/adopt',
+    transport: 'json',
+    auth: 'protected',
+  },
+  postCredentialsClaudeDesktopOpen: {
+    method: 'POST',
+    path: '/api/credentials/claude/desktop/open',
+    transport: 'json',
+    auth: 'protected',
+  },
+  postCredentialsClaudeDesktopPreviewsessions: {
+    method: 'POST',
+    path: '/api/credentials/claude/desktop/preview-sessions',
+    transport: 'json',
+    auth: 'protected',
+  },
+  postCredentialsClaudeDesktopSetup: {
+    method: 'POST',
+    path: '/api/credentials/claude/desktop/setup',
+    transport: 'json',
+    auth: 'protected',
+  },
+  getCredentialsClaudeDesktopStatus: {
+    method: 'GET',
+    path: '/api/credentials/claude/desktop/status',
+    transport: 'json',
+    auth: 'protected',
+  },
+  postCredentialsClaudeDesktopSyncsessions: {
+    method: 'POST',
+    path: '/api/credentials/claude/desktop/sync-sessions',
+    transport: 'json',
+    auth: 'protected',
+  },
   postCredentialsCodex: {
     method: 'POST',
     path: '/api/credentials/codex',
@@ -1105,6 +1207,12 @@ export const routes = {
     transport: 'json',
     auth: 'protected',
   },
+  postCredentialsCodexByIdWarmup: {
+    method: 'POST',
+    path: '/api/credentials/codex/{id}/warmup',
+    transport: 'json',
+    auth: 'protected',
+  },
   postCredentialsPick: {
     method: 'POST',
     path: '/api/credentials/pick',
@@ -1120,6 +1228,12 @@ export const routes = {
   deleteCredentialsById: {
     method: 'DELETE',
     path: '/api/credentials/{id}',
+    transport: 'json',
+    auth: 'protected',
+  },
+  patchCredentialsByIdClieligibility: {
+    method: 'PATCH',
+    path: '/api/credentials/{id}/cli-eligibility',
     transport: 'json',
     auth: 'protected',
   },

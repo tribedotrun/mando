@@ -481,7 +481,7 @@ impl Adapter {
         match self.task_owner()? {
             TaskOwnerProvider::Claude => {
                 let session_id = global_infra::uuid::Uuid::v4().to_string();
-                let credential = super::tick_spawn::pick_credential(pool).await;
+                let credential = super::tick_spawn::pick_credential(pool).await?;
                 let credential_id = global_claude::credential_id(&credential);
                 let mut env = std::collections::HashMap::new();
                 if let Some((_id, token)) = &credential {

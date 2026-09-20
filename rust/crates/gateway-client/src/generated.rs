@@ -183,6 +183,78 @@ pub mod routes {
         event: None,
     };
 
+    pub const POST_CREDENTIALS_CLAUDE_DESKTOP_ADOPT: RouteDescriptor = RouteDescriptor {
+        method: api_types::RouteMethod::Post,
+        path: "/api/credentials/claude/desktop/adopt",
+        transport: api_types::RouteTransport::Json,
+        auth: api_types::RouteAuth::Protected,
+        params: None,
+        query: None,
+        body: Some("api_types::ClaudeDesktopProfileAdoptRequest"),
+        response: Some("api_types::ClaudeDesktopProfileStatus"),
+        event: None,
+    };
+
+    pub const POST_CREDENTIALS_CLAUDE_DESKTOP_OPEN: RouteDescriptor = RouteDescriptor {
+        method: api_types::RouteMethod::Post,
+        path: "/api/credentials/claude/desktop/open",
+        transport: api_types::RouteTransport::Json,
+        auth: api_types::RouteAuth::Protected,
+        params: None,
+        query: None,
+        body: Some("api_types::ClaudeDesktopProfileRequest"),
+        response: Some("api_types::ClaudeDesktopProfileStatus"),
+        event: None,
+    };
+
+    pub const POST_CREDENTIALS_CLAUDE_DESKTOP_PREVIEWSESSIONS: RouteDescriptor = RouteDescriptor {
+        method: api_types::RouteMethod::Post,
+        path: "/api/credentials/claude/desktop/preview-sessions",
+        transport: api_types::RouteTransport::Json,
+        auth: api_types::RouteAuth::Protected,
+        params: None,
+        query: None,
+        body: Some("api_types::ClaudeDesktopSessionImportRequest"),
+        response: Some("api_types::ClaudeDesktopSessionSyncResponse"),
+        event: None,
+    };
+
+    pub const POST_CREDENTIALS_CLAUDE_DESKTOP_SETUP: RouteDescriptor = RouteDescriptor {
+        method: api_types::RouteMethod::Post,
+        path: "/api/credentials/claude/desktop/setup",
+        transport: api_types::RouteTransport::Json,
+        auth: api_types::RouteAuth::Protected,
+        params: None,
+        query: None,
+        body: Some("api_types::ClaudeDesktopProfileRequest"),
+        response: Some("api_types::ClaudeDesktopProfileStatus"),
+        event: None,
+    };
+
+    pub const GET_CREDENTIALS_CLAUDE_DESKTOP_STATUS: RouteDescriptor = RouteDescriptor {
+        method: api_types::RouteMethod::Get,
+        path: "/api/credentials/claude/desktop/status",
+        transport: api_types::RouteTransport::Json,
+        auth: api_types::RouteAuth::Protected,
+        params: None,
+        query: Some("api_types::ClaudeDesktopProfileRequest"),
+        body: None,
+        response: Some("api_types::ClaudeDesktopProfileStatus"),
+        event: None,
+    };
+
+    pub const POST_CREDENTIALS_CLAUDE_DESKTOP_SYNCSESSIONS: RouteDescriptor = RouteDescriptor {
+        method: api_types::RouteMethod::Post,
+        path: "/api/credentials/claude/desktop/sync-sessions",
+        transport: api_types::RouteTransport::Json,
+        auth: api_types::RouteAuth::Protected,
+        params: None,
+        query: None,
+        body: Some("api_types::ClaudeDesktopSessionImportRequest"),
+        response: Some("api_types::ClaudeDesktopSessionSyncResponse"),
+        event: None,
+    };
+
     pub const POST_CREDENTIALS_CODEX: RouteDescriptor = RouteDescriptor {
         method: api_types::RouteMethod::Post,
         path: "/api/credentials/codex",
@@ -315,6 +387,18 @@ pub mod routes {
         event: None,
     };
 
+    pub const POST_CREDENTIALS_CODEX_BY_ID_WARMUP: RouteDescriptor = RouteDescriptor {
+        method: api_types::RouteMethod::Post,
+        path: "/api/credentials/codex/{id}/warmup",
+        transport: api_types::RouteTransport::Json,
+        auth: api_types::RouteAuth::Protected,
+        params: Some("api_types::CredentialIdParams"),
+        query: None,
+        body: Some("api_types::EmptyRequest"),
+        response: Some("api_types::CodexWarmupResponse"),
+        event: None,
+    };
+
     pub const POST_CREDENTIALS_PICK: RouteDescriptor = RouteDescriptor {
         method: api_types::RouteMethod::Post,
         path: "/api/credentials/pick",
@@ -347,6 +431,18 @@ pub mod routes {
         params: Some("api_types::CredentialIdParams"),
         query: None,
         body: None,
+        response: Some("api_types::CredentialMutationResponse"),
+        event: None,
+    };
+
+    pub const PATCH_CREDENTIALS_BY_ID_CLIELIGIBILITY: RouteDescriptor = RouteDescriptor {
+        method: api_types::RouteMethod::Patch,
+        path: "/api/credentials/{id}/cli-eligibility",
+        transport: api_types::RouteTransport::Json,
+        auth: api_types::RouteAuth::Protected,
+        params: Some("api_types::CredentialIdParams"),
+        query: None,
+        body: Some("api_types::UpdateCredentialCliEligibilityRequest"),
         response: Some("api_types::CredentialMutationResponse"),
         event: None,
     };
@@ -1452,6 +1548,78 @@ pub mod routes {
             self.get_json(&GET_CREDENTIALS, GET_CREDENTIALS.path).await
         }
 
+        pub async fn post_credentials_claude_desktop_adopt(
+            &self,
+            body: &api_types::ClaudeDesktopProfileAdoptRequest,
+        ) -> Result<api_types::ClaudeDesktopProfileStatus> {
+            self.post_json(
+                &POST_CREDENTIALS_CLAUDE_DESKTOP_ADOPT,
+                POST_CREDENTIALS_CLAUDE_DESKTOP_ADOPT.path,
+                body,
+            )
+            .await
+        }
+
+        pub async fn post_credentials_claude_desktop_open(
+            &self,
+            body: &api_types::ClaudeDesktopProfileRequest,
+        ) -> Result<api_types::ClaudeDesktopProfileStatus> {
+            self.post_json(
+                &POST_CREDENTIALS_CLAUDE_DESKTOP_OPEN,
+                POST_CREDENTIALS_CLAUDE_DESKTOP_OPEN.path,
+                body,
+            )
+            .await
+        }
+
+        pub async fn post_credentials_claude_desktop_previewsessions(
+            &self,
+            body: &api_types::ClaudeDesktopSessionImportRequest,
+        ) -> Result<api_types::ClaudeDesktopSessionSyncResponse> {
+            self.post_json(
+                &POST_CREDENTIALS_CLAUDE_DESKTOP_PREVIEWSESSIONS,
+                POST_CREDENTIALS_CLAUDE_DESKTOP_PREVIEWSESSIONS.path,
+                body,
+            )
+            .await
+        }
+
+        pub async fn post_credentials_claude_desktop_setup(
+            &self,
+            body: &api_types::ClaudeDesktopProfileRequest,
+        ) -> Result<api_types::ClaudeDesktopProfileStatus> {
+            self.post_json(
+                &POST_CREDENTIALS_CLAUDE_DESKTOP_SETUP,
+                POST_CREDENTIALS_CLAUDE_DESKTOP_SETUP.path,
+                body,
+            )
+            .await
+        }
+
+        pub async fn get_credentials_claude_desktop_status(
+            &self,
+            query: &api_types::ClaudeDesktopProfileRequest,
+        ) -> Result<api_types::ClaudeDesktopProfileStatus> {
+            self.get_json_query(
+                &GET_CREDENTIALS_CLAUDE_DESKTOP_STATUS,
+                GET_CREDENTIALS_CLAUDE_DESKTOP_STATUS.path,
+                query,
+            )
+            .await
+        }
+
+        pub async fn post_credentials_claude_desktop_syncsessions(
+            &self,
+            body: &api_types::ClaudeDesktopSessionImportRequest,
+        ) -> Result<api_types::ClaudeDesktopSessionSyncResponse> {
+            self.post_json(
+                &POST_CREDENTIALS_CLAUDE_DESKTOP_SYNCSESSIONS,
+                POST_CREDENTIALS_CLAUDE_DESKTOP_SYNCSESSIONS.path,
+                body,
+            )
+            .await
+        }
+
         pub async fn post_credentials_codex(
             &self,
             body: &api_types::AddCodexCredentialRequest,
@@ -1578,6 +1746,22 @@ pub mod routes {
                 .await
         }
 
+        pub async fn post_credentials_codex_by_id_warmup(
+            &self,
+            params: &api_types::CredentialIdParams,
+        ) -> Result<api_types::CodexWarmupResponse> {
+            let path = crate::http::render_path(
+                &POST_CREDENTIALS_CODEX_BY_ID_WARMUP,
+                &[("id", params.id.to_string())],
+            );
+            self.post_json(
+                &POST_CREDENTIALS_CODEX_BY_ID_WARMUP,
+                &path,
+                &api_types::EmptyRequest {},
+            )
+            .await
+        }
+
         pub async fn post_credentials_pick(
             &self,
             body: &api_types::CredentialPickRequest,
@@ -1607,6 +1791,19 @@ pub mod routes {
                 &[("id", params.id.to_string())],
             );
             self.delete_json(&DELETE_CREDENTIALS_BY_ID, &path).await
+        }
+
+        pub async fn patch_credentials_by_id_clieligibility(
+            &self,
+            params: &api_types::CredentialIdParams,
+            body: &api_types::UpdateCredentialCliEligibilityRequest,
+        ) -> Result<api_types::CredentialMutationResponse> {
+            let path = crate::http::render_path(
+                &PATCH_CREDENTIALS_BY_ID_CLIELIGIBILITY,
+                &[("id", params.id.to_string())],
+            );
+            self.patch_json(&PATCH_CREDENTIALS_BY_ID_CLIELIGIBILITY, &path, body)
+                .await
         }
 
         pub async fn post_credentials_by_id_disable(

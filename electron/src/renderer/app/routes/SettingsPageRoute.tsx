@@ -2,6 +2,7 @@ import React from 'react';
 import { useNavigate, useParams } from '@tanstack/react-router';
 import { SettingsPage, type SettingsSection } from '#renderer/domains/settings/ui/SettingsPage';
 import { ErrorBoundary } from '#renderer/global/ui/ErrorBoundary';
+import { isSettingsPath } from '#renderer/global/service/routeHelpers';
 import { router } from '#renderer/app/router';
 
 export function SettingsPageRoute(): React.ReactElement {
@@ -17,10 +18,16 @@ export function SettingsPageRoute(): React.ReactElement {
             void navigate({
               to: '/settings/$section',
               params: { section: s },
-              replace: true,
+              replace: isSettingsPath(router.state.location.pathname),
             })
           }
-          onBack={() => router.history.back()}
+          onBack={() => {
+            if (router.history.canGoBack()) {
+              router.history.back();
+              return;
+            }
+            void navigate({ to: '/' });
+          }}
         />
       </ErrorBoundary>
     </div>

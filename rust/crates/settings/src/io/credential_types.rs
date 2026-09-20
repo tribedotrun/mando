@@ -10,6 +10,7 @@ pub struct CredentialRow {
     pub expires_at: Option<i64>,
     pub rate_limit_cooldown_until: Option<i64>,
     pub disabled_at: Option<i64>,
+    pub cli_eligible: bool,
     pub created_at: String,
     pub updated_at: String,
     pub five_hour_utilization: Option<f64>,
@@ -33,6 +34,8 @@ pub struct CredentialRow {
     pub plan_type: Option<String>,
     pub credits_balance: Option<String>,
     pub credits_unlimited: i64,
+    /// Unix seconds of the last Codex usage warm-up (see `io::codex_warmup`).
+    pub codex_warmup_at: Option<i64>,
 }
 
 /// Per-window usage snapshot included in the public credential info payload.
@@ -52,6 +55,8 @@ pub struct CodexInfo {
     pub plan_type: Option<String>,
     pub credits_balance: Option<String>,
     pub credits_unlimited: bool,
+    /// Unix seconds of the last usage warm-up, when one has run.
+    pub warmup_at: Option<i64>,
 }
 
 /// Public credential info (no secrets).
@@ -65,6 +70,7 @@ pub struct CredentialInfo {
     pub expires_at: Option<i64>,
     pub rate_limit_cooldown_until: Option<i64>,
     pub disabled_at: Option<i64>,
+    pub cli_eligible: bool,
     pub created_at: String,
     pub is_expired: bool,
     pub is_rate_limited: bool,
@@ -97,6 +103,7 @@ impl CredentialRow {
                 plan_type: self.plan_type.clone(),
                 credits_balance: self.credits_balance.clone(),
                 credits_unlimited: self.credits_unlimited != 0,
+                warmup_at: self.codex_warmup_at,
             })
         } else {
             None
@@ -109,6 +116,7 @@ impl CredentialRow {
             expires_at: self.expires_at,
             rate_limit_cooldown_until: self.rate_limit_cooldown_until,
             disabled_at: self.disabled_at,
+            cli_eligible: self.cli_eligible,
             created_at: self.created_at.clone(),
             is_expired: self.expires_at.is_some_and(|ea| ea <= now_ms),
             is_rate_limited: self

@@ -13,6 +13,9 @@
 //!    [`credential_rate_limit::activate`] so `pick_for_worker` filtering
 //!    keeps one source of truth.
 //! 5. Emits `BusPayload::Credentials` so the Electron UI refetches live.
+//! 6. For an idle Codex credential (zero usage, no reset clock running),
+//!    fires a usage warm-up through [`credential_codex_warmup`] so the
+//!    rolling windows start counting before real work lands on it.
 //!
 //! Claude usage refreshes every three hours; Codex every ten minutes.
 //! Expired cooldowns trigger a fresh probe before a credential is reused.
@@ -29,7 +32,9 @@ use tracing::{info, warn};
 use global_bus::EventBus;
 use settings::credentials::{self, CredentialRow};
 use settings::usage_probe::{ProbeError, RateLimitStatus, UsageSnapshot};
+use settings::SettingsRuntime;
 
+use super::credential_codex_warmup::{self, WarmupAttempts};
 use super::credential_rate_limit;
 
 /// Check scheduling deadlines every ten minutes.
@@ -46,8 +51,14 @@ const STARTUP_DELAY: Duration = Duration::from_secs(15);
 ///
 /// Spawned from `mando-gateway::background_tasks::spawn_credential_usage_poll`.
 #[tracing::instrument(skip_all)]
-pub async fn run(pool: SqlitePool, bus: Arc<EventBus>, cancel: CancellationToken) {
+pub async fn run(
+    pool: SqlitePool,
+    bus: Arc<EventBus>,
+    settings: Arc<SettingsRuntime>,
+    cancel: CancellationToken,
+) {
     let mut last_attempts = HashMap::new();
+    let mut warmup_attempts = WarmupAttempts::default();
     info!(
         module = "captain",
         "credential usage poll started (interval={}s)",
@@ -67,7 +78,7 @@ pub async fn run(pool: SqlitePool, bus: Arc<EventBus>, cancel: CancellationToken
         }
 
         let tick_result = tokio::select! {
-            result = tick_once(&pool, &bus, &mut last_attempts) => result,
+            result = tick_once(&pool, &bus, &settings, &mut last_attempts, &mut warmup_attempts) => result,
             _ = cancel.cancelled() => break,
         };
         if let Err(e) = tick_result {
@@ -92,10 +103,13 @@ pub async fn run(pool: SqlitePool, bus: Arc<EventBus>, cancel: CancellationToken
 async fn tick_once(
     pool: &SqlitePool,
     bus: &EventBus,
+    settings: &SettingsRuntime,
     last_attempts: &mut HashMap<i64, i64>,
+    warmup_attempts: &mut WarmupAttempts,
 ) -> anyhow::Result<()> {
     let rows = credentials::list_all(pool).await?;
     last_attempts.retain(|id, _| rows.iter().any(|row| row.id == *id));
+    warmup_attempts.retain_ids(|id| rows.iter().any(|row| row.id == id));
     if rows.is_empty() {
         return Ok(());
     }
@@ -129,6 +143,14 @@ async fn tick_once(
                     unified_status = snapshot.unified_status.as_str(),
                     "credential usage probed"
                 );
+                credential_codex_warmup::maybe_warm(
+                    settings,
+                    &row,
+                    &snapshot,
+                    warmup_attempts,
+                    now_secs,
+                )
+                .await;
             }
             Err(ProbeError::Unauthorized) => {
                 warn!(

@@ -48,9 +48,9 @@ pub struct CredentialPick {
 
 /// POST /api/credentials/pick -- response.
 ///
-/// `pick` is `None` when no credential is usable right now (table empty,
-/// all expired, or all in rate-limit cooldown). The shell wrapper treats
-/// `None` as "fall through to ambient login" rather than an error.
+/// `pick` is `None` only when no managed Claude pool is configured.
+/// An explicit unavailable selection or exhausted managed pool is an error,
+/// preventing launchers from falling through to an excluded ambient account.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(deny_unknown_fields)]
 pub struct CredentialPickResponse {

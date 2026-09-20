@@ -24,6 +24,7 @@ pub struct CredentialInfo {
     pub is_expired: bool,
     pub is_rate_limited: bool,
     pub is_disabled: bool,
+    pub cli_eligible: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional = nullable)]
     pub five_hour: Option<CredentialWindowInfo>,
@@ -83,4 +84,10 @@ pub struct CredentialUsageSnapshot {
     pub unified_status: CredentialRateLimitStatus,
     pub representative_claim: Option<String>,
     pub probed_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct UpdateCredentialCliEligibilityRequest {
+    pub cli_eligible: bool,
 }

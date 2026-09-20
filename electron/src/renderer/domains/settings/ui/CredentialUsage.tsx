@@ -4,6 +4,7 @@ import { Button } from '#renderer/global/ui/primitives/button';
 import { Progress } from '#renderer/global/ui/primitives/progress';
 import { cn } from '#renderer/global/service/cn';
 import { CodexResetCredits } from '#renderer/domains/settings/ui/CodexResetCredits';
+import { CodexWarmupButton } from '#renderer/domains/settings/ui/CodexWarmupButton';
 import { CredentialExpiredNotice } from '#renderer/domains/settings/ui/CredentialExpiredNotice';
 import {
   useCredentialProbe,
@@ -61,6 +62,7 @@ export function CredentialUsage({ cred }: { cred: CredentialInfo }): React.React
   }
   const { fiveHour, sevenDay, sevenDayFable, lastProbedAt, costSinceProbeUsd } = cred;
   const sinceProbe = formatSinceProbe(lastProbedAt);
+  const sinceWarmup = formatSinceProbe(cred.codex?.warmupAt);
   if (fiveHour == null && sevenDay == null && sevenDayFable == null) {
     return (
       <div className="mt-2 flex items-center justify-between text-xs text-muted-foreground">
@@ -94,17 +96,25 @@ export function CredentialUsage({ cred }: { cred: CredentialInfo }): React.React
           {costSinceProbeUsd != null && costSinceProbeUsd > 0
             ? ` · +${formatUsd(costSinceProbeUsd)} since`
             : ''}
+          {cred.provider === 'codex' && sinceWarmup ? (
+            <span data-testid="codex-warmup-since"> · clock started {sinceWarmup}</span>
+          ) : null}
         </span>
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          onClick={() => probeMut.mutate(cred.id)}
-          disabled={probeMut.isPending}
-          title="Refresh usage"
-          aria-label="Refresh credential usage"
-        >
-          <RefreshCw size={12} className={probeMut.isPending ? 'animate-spin' : undefined} />
-        </Button>
+        <span className="flex items-center gap-0.5">
+          {cred.provider === 'codex' ? (
+            <CodexWarmupButton credentialId={cred.id} disabled={cred.isDisabled} />
+          ) : null}
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            onClick={() => probeMut.mutate(cred.id)}
+            disabled={probeMut.isPending}
+            title="Refresh usage"
+            aria-label="Refresh credential usage"
+          >
+            <RefreshCw size={12} className={probeMut.isPending ? 'animate-spin' : undefined} />
+          </Button>
+        </span>
       </div>
     </div>
   );

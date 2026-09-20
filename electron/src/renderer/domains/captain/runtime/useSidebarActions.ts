@@ -13,7 +13,7 @@ import { featuresPatch } from '#renderer/global/service/configPatches';
 import { useNativeActions } from '#renderer/global/runtime/useNativeActions';
 import { copyToClipboard } from '#renderer/global/runtime/useFeedback';
 import { useProjectWorkflows } from '#renderer/domains/captain/runtime/useProjectWorkflows';
-import { TAB_ROUTES } from '#renderer/global/service/routeHelpers';
+import { TAB_ROUTES, isSettingsPath } from '#renderer/global/service/routeHelpers';
 import type { SidebarActions, Tab } from '#renderer/global/runtime/SidebarContext';
 
 interface SidebarActionsParams {
@@ -59,7 +59,11 @@ export function useSidebarActions({
       openWorkbench: (workbench: { id?: number; worktree: string }) =>
         openWorktreeWorkbench(workbench.id, workbench.worktree),
       openSettings: () =>
-        void navigate({ to: '/settings/$section', params: { section: 'general' } }),
+        void navigate({
+          to: '/settings/$section',
+          params: { section: 'general' },
+          replace: isSettingsPath(router.state.location.pathname),
+        }),
       newTask: () => useUIStore.getState().openCreateTask(),
       goBack: () => router.history.back(),
       goForward: () => router.history.forward(),

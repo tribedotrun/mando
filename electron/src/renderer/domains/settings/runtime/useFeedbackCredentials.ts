@@ -7,6 +7,7 @@ import {
   useCredentialRemove as useCredentialRemoveMutation,
   useCredentialSetDisabled as useCredentialSetDisabledMutation,
   useCredentialReveal,
+  useCredentialCliEligibility as useCredentialCliEligibilityMutation,
   type CredentialInfo,
   type CredentialRateLimitStatus,
   type CredentialWindowInfo,
@@ -14,6 +15,12 @@ import {
 
 export { useCredentialsList, useCredentialReveal };
 export type { CredentialInfo, CredentialWindowInfo, CredentialRateLimitStatus };
+
+export function useCredentialCliEligibility() {
+  return useMutationFeedback(useCredentialCliEligibilityMutation(), {
+    onError: (err) => toast.error(err.message || 'Failed to update CLI eligibility'),
+  });
+}
 
 export function useCredentialAdd() {
   const mutation = useCredentialAddMutation();

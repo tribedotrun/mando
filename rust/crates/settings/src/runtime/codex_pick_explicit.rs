@@ -41,7 +41,29 @@ impl SettingsRuntime {
         let Some(account_id) = row.account_id.clone() else {
             return Ok(None);
         };
-        self.materialize_codex_pick(resolved_id, row.access_token, account_id)
+        self.materialize_codex_pick(resolved_id, row.access_token, account_id, true)
+            .await
+    }
+
+    /// Materialize a specific Codex credential for a usage warm-up run.
+    /// Same refresh-and-serialize path as an explicit pick, but does not
+    /// stamp `last_picked_at`: a warm-up is not a checkout and must not
+    /// push the credential down the load-balanced pick order.
+    #[tracing::instrument(skip(self))]
+    pub(super) async fn materialize_codex_credential_for_warmup(
+        &self,
+        id: i64,
+    ) -> Result<Option<PickedCodexCredential>, CodexCredentialError> {
+        let Some(row) = credentials::get_row_by_id(&self.db_pool, id).await? else {
+            return Ok(None);
+        };
+        if row.provider != "codex" {
+            return Err(CodexCredentialError::NotCodex);
+        }
+        let Some(account_id) = row.account_id.clone() else {
+            return Err(CodexCredentialError::NoAccountId);
+        };
+        self.materialize_codex_pick(id, row.access_token, account_id, false)
             .await
     }
 
@@ -50,6 +72,7 @@ impl SettingsRuntime {
         id: i64,
         access_token: String,
         account_id: String,
+        record_pick: bool,
     ) -> Result<Option<PickedCodexCredential>, CodexCredentialError> {
         let row = credentials::get_row_by_id(&self.db_pool, id)
             .await?
@@ -96,7 +119,9 @@ impl SettingsRuntime {
         )
         .map_err(|e| CodexCredentialError::Db(anyhow::Error::msg(e.to_string())))?;
 
-        credentials::record_codex_pick(&self.db_pool, id).await?;
+        if record_pick {
+            credentials::record_codex_pick(&self.db_pool, id).await?;
+        }
         Ok(Some(PickedCodexCredential {
             id,
             label: row.label,

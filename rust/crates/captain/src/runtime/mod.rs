@@ -35,6 +35,7 @@ pub(crate) mod codex_structured;
 pub(crate) mod codex_worker_control;
 pub(crate) mod codex_worker_prompt;
 pub(crate) mod codex_worker_spawn;
+mod credential_codex_warmup;
 pub mod credential_rate_limit;
 pub mod credential_usage_poll;
 pub mod daemon;

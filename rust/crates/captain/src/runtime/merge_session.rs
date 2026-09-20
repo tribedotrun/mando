@@ -75,7 +75,7 @@ async fn spawn_claude(
         }
     }
 
-    let credential = super::tick_spawn::pick_credential(pool).await;
+    let credential = super::tick_spawn::pick_credential(pool).await?;
     super::claude_detached_session::spawn_detached_claude_session(DetachedClaudeSession {
         caller: "captain-merge-async",
         phase: "captain merge",

@@ -32,6 +32,8 @@ pub enum ApplyConfigError {
 /// `Other` shrinks as specific failure modes get promoted to dedicated variants.
 #[derive(Debug, thiserror::Error)]
 pub enum SettingsError {
+    #[error("No CLI-eligible Claude credential is available; enable an account for CLI or wait for its allowance to reset")]
+    ClaudeCliUnavailable,
     #[error(transparent)]
     Db(#[from] sqlx::Error),
     #[error(transparent)]

@@ -209,35 +209,33 @@ pub(super) async fn spawn_claude_worker(
         }
     }
 
-    let credential = super::tick_spawn::pick_credential(pool).await;
-    if credential.is_none() {
-        if let Ok(true) = settings::credentials::has_any(pool).await {
-            let remaining = settings::credentials::earliest_cooldown_remaining_secs(pool)
-                .await
-                .unwrap_or(600);
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs() as i64;
-            let earliest_reset = now + remaining;
-            if let Err(e) =
-                crate::io::queries::tasks::set_paused_until(pool, item.id, earliest_reset).await
-            {
-                tracing::warn!(
-                    module = "spawner",
-                    task_id = item.id,
-                    error = %e,
-                    "failed to pause task after all credentials exhausted"
-                );
-            }
+    let credential = super::tick_spawn::pick_credential_probed(pool).await?;
+    if credential.is_none() && settings::credentials::has_any(pool).await? {
+        let remaining = settings::credentials::earliest_cooldown_remaining_secs(pool)
+            .await
+            .unwrap_or(600);
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+        let earliest_reset = now + remaining;
+        if let Err(e) =
+            crate::io::queries::tasks::set_paused_until(pool, item.id, earliest_reset).await
+        {
             tracing::warn!(
                 module = "spawner",
                 task_id = item.id,
-                earliest_reset,
-                "paused worker dispatch — every credential in pool is rate-limited"
+                error = %e,
+                "failed to pause task after all credentials exhausted"
             );
-            anyhow::bail!("all credentials rate-limited; task paused until {earliest_reset}");
         }
+        tracing::warn!(
+            module = "spawner",
+            task_id = item.id,
+            earliest_reset,
+            "paused worker dispatch — no CLI-eligible credential is available"
+        );
+        anyhow::bail!("no CLI-eligible credential available; task paused until {earliest_reset}");
     }
     let worker_cred = credential
         .as_ref()
