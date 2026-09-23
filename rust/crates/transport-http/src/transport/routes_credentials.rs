@@ -331,11 +331,11 @@ async fn probe_credential(
                         reset_at: snapshot.seven_day.reset_at,
                         status: api_probe_rate_limit_status(snapshot.seven_day.status),
                     },
-                    seven_day_fable: snapshot.seven_day_fable.map(|window| {
+                    seven_day_fable: snapshot.seven_day_fable.window().map(|window| {
                         api_types::UsageWindowState {
                             utilization: window.utilization,
                             reset_at: window.reset_at,
-                            status: api_probe_rate_limit_status(window.status),
+                            status: api_probe_rate_limit_status(window.status.clone()),
                         }
                     }),
                     unified_status: api_probe_rate_limit_status(snapshot.unified_status),

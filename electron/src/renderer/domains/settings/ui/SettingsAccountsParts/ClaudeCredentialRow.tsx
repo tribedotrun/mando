@@ -11,9 +11,11 @@ import type { CredentialInfo } from '#renderer/domains/settings/runtime/hooks';
 import { Switch } from '#renderer/global/ui/primitives/switch';
 import { useCredentialCliEligibility } from '#renderer/domains/settings/runtime/useFeedbackCredentials';
 import { ClaudeDesktopProfileControls } from '#renderer/domains/settings/ui/SettingsAccountsParts/ClaudeDesktopProfileControls';
+import type { CredentialRouteCandidate } from '#shared/daemon-contract';
 
 interface ClaudeCredentialRowProps {
   cred: CredentialInfo;
+  leaseCount?: CredentialRouteCandidate;
   onRemove: () => void;
   onSetDisabled: (disabled: boolean) => void;
   removePending: boolean;
@@ -22,6 +24,7 @@ interface ClaudeCredentialRowProps {
 
 export function ClaudeCredentialRow({
   cred,
+  leaseCount,
   onRemove,
   onSetDisabled,
   removePending,
@@ -51,6 +54,16 @@ export function ClaudeCredentialRow({
         />
       </div>
       <CredentialUsage cred={cred} />
+      {leaseCount ? (
+        <p
+          className="mt-2 text-xs text-muted-foreground"
+          data-testid={`credential-load-${cred.id}`}
+        >
+          {leaseCount.live_sessions} live sessions · {leaseCount.pending_launches} pending launches
+          <span className="ml-1">· tracked on this host</span>
+          <span className="mt-1 block">{leaseCount.reason}</span>
+        </p>
+      ) : null}
       <label className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
         <Switch
           size="sm"

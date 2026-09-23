@@ -25,6 +25,7 @@ pub struct CredentialRow {
     pub unified_status: Option<String>,
     pub representative_claim: Option<String>,
     pub last_probed_at: Option<i64>,
+    pub fable_last_probed_at: Option<i64>,
     pub last_picked_at: Option<i64>,
     pub token_updated_at: Option<i64>,
     pub provider: String,

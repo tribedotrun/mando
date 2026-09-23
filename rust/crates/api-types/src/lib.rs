@@ -3,6 +3,7 @@
 //! Shared between transport-http (server) and Electron codegen.
 
 mod config;
+mod credential_routing;
 mod credentials;
 mod credentials_claude_desktop;
 mod credentials_codex;
@@ -20,6 +21,7 @@ mod timeline_payload;
 mod transcript_events;
 
 pub use config::*;
+pub use credential_routing::*;
 pub use credentials::*;
 pub use credentials_claude_desktop::*;
 pub use credentials_codex::*;

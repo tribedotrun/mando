@@ -461,6 +461,27 @@ export const credentialInfoSchema = z
       .optional(),
   })
   .strict();
+export const credentialLeaseCountSchema = z
+  .object({ credential_id: z.number(), live_sessions: z.number(), pending_launches: z.number() })
+  .strict();
+export const credentialLeaseCountsResponseSchema = z
+  .object({ profiles: z.array(z.lazy(() => credentialLeaseCountSchema)) })
+  .strict();
+export const credentialLeaseHeartbeatRequestSchema = z
+  .object({
+    launch_id: z.string(),
+    credential_id: z.number(),
+    session_id: z.string().nullable(),
+    pid: z.number(),
+    cwd: z.string(),
+    model: z.string().nullable(),
+    confirm_reservation: z.boolean(),
+  })
+  .strict();
+export const credentialLeaseReleaseRequestSchema = z.object({ launch_id: z.string() }).strict();
+export const credentialLeaseResponseSchema = z
+  .object({ ok: z.boolean(), expires_at: z.number().nullable() })
+  .strict();
 export const credentialMutationResponseSchema = z
   .object({ ok: z.boolean(), error: z.string().nullable() })
   .strict();
@@ -475,6 +496,41 @@ export const credentialPickResponseSchema = z
   .strict();
 export const credentialProviderSchema = z.enum(['claude', 'codex']);
 export const credentialRateLimitStatusSchema = z.enum(['allowed', 'allowed_warning', 'rejected']);
+export const credentialRouteCandidateSchema = z
+  .object({
+    credential_id: z.number(),
+    label: z.string(),
+    eligible: z.boolean(),
+    reason: z.string(),
+    remaining_percent: z.number().nullable(),
+    weekly_reset_at: z.number().nullable(),
+    live_sessions: z.number(),
+    pending_launches: z.number(),
+    headroom_percent: z.number().nullable(),
+    last_probed_at: z.number().nullable(),
+  })
+  .strict();
+export const credentialRouteRequestSchema = z
+  .object({
+    launch_id: z.string(),
+    current_credential_id: z.number().nullable(),
+    profile: z.string().nullable(),
+    model: z.string().nullable(),
+    dry_run: z.boolean(),
+    min_headroom_percent: z.number().nullable(),
+  })
+  .strict();
+export const credentialRouteResponseSchema = z
+  .object({
+    pick: z.lazy(() => credentialPickSchema).nullable(),
+    reason: z.string(),
+    candidates: z.array(z.lazy(() => credentialRouteCandidateSchema)),
+    reservation_expires_at: z.number().nullable(),
+  })
+  .strict();
+export const credentialRoutingStatusResponseSchema = z
+  .object({ candidates: z.array(z.lazy(() => credentialRouteCandidateSchema)) })
+  .strict();
 export const credentialTokenResponseSchema = z.object({ token: z.string() }).strict();
 export const credentialUsageSnapshotSchema = z
   .object({
@@ -2225,6 +2281,8 @@ export const resSchemas = {
   getCredentialsCodexAppStatus: codexDesktopAppStatusResponseSchema,
   getCredentialsCodexByIdResetcredits: codexResetCreditsResponseSchema,
   getCredentialsCodexLoginCurrent: codexLoginStatusResponseSchema,
+  getCredentialsLeases: credentialLeaseCountsResponseSchema,
+  getCredentialsRouting: credentialRoutingStatusResponseSchema,
   getHealth: healthResponseSchema,
   getHealthSystem: systemHealthResponseSchema,
   getHealthTelegram: telegramHealthSchema,
@@ -2284,7 +2342,10 @@ export const resSchemas = {
   postCredentialsCodexLoginStart: startCodexLoginResponseSchema,
   postCredentialsCodexPick: codexCredentialPickResponseSchema,
   postCredentialsCodexSync: syncCodexCredentialResponseSchema,
+  postCredentialsLeasesHeartbeat: credentialLeaseResponseSchema,
+  postCredentialsLeasesRelease: credentialLeaseResponseSchema,
   postCredentialsPick: credentialPickResponseSchema,
+  postCredentialsRoute: credentialRouteResponseSchema,
   postCredentialsSetuptoken: setupTokenResponseSchema,
   postFirecrawlScrape: firecrawlScrapeResponseSchema,
   postNotify: notifyResponseSchema,
@@ -2361,7 +2422,10 @@ export const bodySchemas = {
   postCredentialsCodexLoginStart: startCodexLoginRequestSchema,
   postCredentialsCodexPick: credentialPickRequestSchema,
   postCredentialsCodexSync: syncCodexCredentialRequestSchema,
+  postCredentialsLeasesHeartbeat: credentialLeaseHeartbeatRequestSchema,
+  postCredentialsLeasesRelease: credentialLeaseReleaseRequestSchema,
   postCredentialsPick: credentialPickRequestSchema,
+  postCredentialsRoute: credentialRouteRequestSchema,
   postCredentialsSetuptoken: setupTokenRequestSchema,
   postFirecrawlScrape: firecrawlScrapeRequestSchema,
   postNotify: notifyRequestSchema,

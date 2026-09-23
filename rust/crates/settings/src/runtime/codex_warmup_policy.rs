@@ -36,7 +36,7 @@ pub fn codex_warmup_due(row: &CredentialRow, snapshot: &UsageSnapshot, now_secs:
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::io::usage_probe::WindowState;
+    use crate::io::usage_probe::{FableUsage, WindowState};
 
     fn row(provider: &str, warmup_at: Option<i64>) -> CredentialRow {
         CredentialRow {
@@ -61,6 +61,7 @@ mod tests {
             unified_status: None,
             representative_claim: None,
             last_probed_at: None,
+            fable_last_probed_at: None,
             last_picked_at: None,
             token_updated_at: None,
             provider: provider.into(),
@@ -83,7 +84,7 @@ mod tests {
         UsageSnapshot {
             five_hour: window(five_hour),
             seven_day: window(seven_day),
-            seven_day_fable: None,
+            seven_day_fable: FableUsage::Absent,
             unified_status: status,
             representative_claim: None,
             probed_at: 1_000_000,

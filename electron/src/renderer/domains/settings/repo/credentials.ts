@@ -30,6 +30,15 @@ export function useCredentialsList() {
   });
 }
 
+export function useCredentialRouting() {
+  return useQuery({
+    queryKey: queryKeys.credentials.routing(),
+    meta: daemonSyncMeta('polling', 'live Claude launches and pending switches expire over time'),
+    queryFn: () => toReactQuery(apiGetRouteR('getCredentialsRouting')),
+    refetchInterval: 15_000,
+  });
+}
+
 export function useCredentialAdd() {
   const qc = useQueryClient();
   return useMutation({

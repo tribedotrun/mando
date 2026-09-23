@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '#renderer/global/repo/queryKeys';
 
 export { useConfig } from '#renderer/global/repo/queries';
+export { useCredentialRouting } from '#renderer/domains/settings/repo/credentials';
 export {
   useConfigSave,
   useProjectEdit,

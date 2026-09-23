@@ -64,29 +64,34 @@ impl Db {
         // We embed migrations as raw SQL and run them manually with a version table,
         // because sqlx::migrate!() requires a build-time DATABASE_URL and offline mode
         // setup that adds CI complexity. This approach is simpler and equally safe.
+        //
+        // Every migration runs on this one connection. SQLite checks DDL such
+        // as ADD COLUMN against a connection's cached schema, so a pooled
+        // connection that cached a table before an earlier migration changed
+        // it reports "duplicate column" when a later migration re-adds a
+        // dropped column (051 drops the Fable columns, 052 restores them).
+        let mut conn = self.pool.acquire().await?;
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS _schema_version (
                 version INTEGER PRIMARY KEY,
                 applied_at TEXT NOT NULL DEFAULT (datetime('now'))
             )",
         )
-        .execute(&self.pool)
+        .execute(&mut *conn)
         .await?;
 
         let current: i64 =
             sqlx::query_scalar("SELECT COALESCE(MAX(version), 0) FROM _schema_version")
-                .fetch_one(&self.pool)
+                .fetch_one(&mut *conn)
                 .await?;
 
         for (version, sql) in MIGRATIONS {
             if *version > current {
                 // PRAGMA foreign_keys is a no-op inside a transaction AND is
-                // scoped to a single connection. The pool may hand different
-                // queries to different connections, so the OFF/tx/ON triple
-                // must all run on the same acquired connection — otherwise a
-                // migration that drops a table with incoming FK references
-                // fails with FOREIGN KEY constraint (19) on an unrelated
-                // pool connection that still has FKs ON.
+                // scoped to a single connection, so the OFF/tx/ON triple runs
+                // on the shared migration connection — otherwise a migration
+                // that drops a table with incoming FK references fails with
+                // FOREIGN KEY constraint (19) on a connection with FKs ON.
                 let needs_fk_off = sql.contains("PRAGMA foreign_keys = OFF");
 
                 // Strip PRAGMA foreign_keys statements from the SQL since
@@ -104,7 +109,6 @@ impl Db {
                     sql.to_string()
                 };
 
-                let mut conn = self.pool.acquire().await?;
                 if needs_fk_off {
                     sqlx::query("PRAGMA foreign_keys = OFF")
                         .execute(&mut *conn)
@@ -146,8 +150,6 @@ impl Db {
                         "restore foreign_keys=ON after migration"
                     );
                 }
-                drop(conn);
-
                 migration_result?;
                 tracing::info!(module = "global-db-pool", version, "migration applied");
             }

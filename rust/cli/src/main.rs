@@ -10,6 +10,8 @@
 )]
 
 mod captain;
+mod claude_control;
+mod claude_launcher;
 mod codex_app;
 mod credentials;
 mod credentials_codex_pick;
@@ -43,6 +45,12 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Launch Claude with a managed profile and resumable profile switching.
+    Claude(claude_launcher::ClaudeArgs),
+    /// Queue a profile switch for the Claude session that invoked this command.
+    Switch(claude_control::SwitchArgs),
+    #[command(hide = true)]
+    ClaudeHook,
     /// Manage tasks
     Todo(todo::TodoArgs),
     /// Manage configured projects
@@ -170,6 +178,9 @@ async fn main() {
         .init();
 
     let result = match cli.command {
+        Commands::Claude(args) => claude_launcher::handle(args).await,
+        Commands::Switch(args) => claude_control::handle_switch(args).await,
+        Commands::ClaudeHook => claude_control::handle_hook().await,
         Commands::Todo(args) => todo::handle(args).await,
         Commands::Project(args) => project::handle(args).await,
         Commands::Captain(args) => captain::handle(args).await,

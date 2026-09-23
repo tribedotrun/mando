@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "agent-runtime-core"
-version = "0.1.21-beta.8"
+version = "0.1.21-beta.9"
 dependencies = [
  "anyhow",
  "api-types",
@@ -98,7 +98,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "api-types"
-version = "0.1.21-beta.8"
+version = "0.1.21-beta.9"
 dependencies = [
  "global-types",
  "inventory",
@@ -109,7 +109,7 @@ dependencies = [
 
 [[package]]
 name = "api-types-codegen"
-version = "0.1.21-beta.8"
+version = "0.1.21-beta.9"
 dependencies = [
  "anyhow",
  "api-types",
@@ -261,7 +261,7 @@ checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 
 [[package]]
 name = "captain"
-version = "0.1.21-beta.8"
+version = "0.1.21-beta.9"
 dependencies = [
  "agent-runtime-core",
  "anyhow",
@@ -740,7 +740,7 @@ dependencies = [
 
 [[package]]
 name = "gateway-client"
-version = "0.1.21-beta.8"
+version = "0.1.21-beta.9"
 dependencies = [
  "anyhow",
  "api-types",
@@ -800,7 +800,7 @@ dependencies = [
 
 [[package]]
 name = "global-bus"
-version = "0.1.21-beta.8"
+version = "0.1.21-beta.9"
 dependencies = [
  "api-types",
  "tokio",
@@ -808,7 +808,7 @@ dependencies = [
 
 [[package]]
 name = "global-claude"
-version = "0.1.21-beta.8"
+version = "0.1.21-beta.9"
 dependencies = [
  "agent-runtime-core",
  "anyhow",
@@ -826,7 +826,7 @@ dependencies = [
 
 [[package]]
 name = "global-codex-app-server"
-version = "0.1.21-beta.8"
+version = "0.1.21-beta.9"
 dependencies = [
  "agent-runtime-core",
  "anyhow",
@@ -839,7 +839,7 @@ dependencies = [
 
 [[package]]
 name = "global-db"
-version = "0.1.21-beta.8"
+version = "0.1.21-beta.9"
 dependencies = [
  "anyhow",
  "global-infra",
@@ -852,7 +852,7 @@ dependencies = [
 
 [[package]]
 name = "global-git"
-version = "0.1.21-beta.8"
+version = "0.1.21-beta.9"
 dependencies = [
  "anyhow",
  "global-infra",
@@ -864,7 +864,7 @@ dependencies = [
 
 [[package]]
 name = "global-github"
-version = "0.1.21-beta.8"
+version = "0.1.21-beta.9"
 dependencies = [
  "anyhow",
  "global-infra",
@@ -876,7 +876,7 @@ dependencies = [
 
 [[package]]
 name = "global-infra"
-version = "0.1.21-beta.8"
+version = "0.1.21-beta.9"
 dependencies = [
  "getrandom 0.2.17",
  "regex",
@@ -890,7 +890,7 @@ dependencies = [
 
 [[package]]
 name = "global-net"
-version = "0.1.21-beta.8"
+version = "0.1.21-beta.9"
 dependencies = [
  "global-infra",
  "reqwest",
@@ -899,7 +899,7 @@ dependencies = [
 
 [[package]]
 name = "global-opencode"
-version = "0.1.21-beta.8"
+version = "0.1.21-beta.9"
 dependencies = [
  "agent-runtime-core",
  "anyhow",
@@ -911,7 +911,7 @@ dependencies = [
 
 [[package]]
 name = "global-types"
-version = "0.1.21-beta.8"
+version = "0.1.21-beta.9"
 dependencies = [
  "global-infra",
  "serde",
@@ -1092,9 +1092,9 @@ dependencies = [
 
 [[package]]
 name = "hyper-rustls"
-version = "0.27.9"
+version = "0.27.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "33ca68d021ef39cf6463ab54c1d0f5daf03377b70561305bb89a8f83aab66e0f"
+checksum = "dfa8e654703247911e29c23fbeaa261834bd9bb74efba2f9acddc37bfb127f53"
 dependencies = [
  "http",
  "hyper",
@@ -1367,9 +1367,9 @@ checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
 
 [[package]]
 name = "libredox"
-version = "0.1.24"
+version = "0.1.25"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6480ccc157a1389bb2e4891b24751b0f798ba640d22386f23143fbcc89da195a"
+checksum = "61ff90caf6077a803a240f62fdbe88645a890bbca49ef8174c3cb0404362171d"
 dependencies = [
  "bitflags",
  "libc",
@@ -1423,18 +1423,21 @@ checksum = "c41e0c4fef86961ac6d6f8a82609f55f31b05e4fce149ac5710e439df7619ba4"
 
 [[package]]
 name = "mando-cli"
-version = "0.1.21-beta.8"
+version = "0.1.21-beta.9"
 dependencies = [
  "anyhow",
  "api-types",
  "clap",
  "gateway-client",
+ "global-claude",
  "global-git",
  "global-infra",
  "global-types",
  "reqwest",
+ "serde",
  "serde_json",
  "sqlx",
+ "tempfile",
  "thiserror",
  "tokio",
  "tracing",
@@ -1443,7 +1446,7 @@ dependencies = [
 
 [[package]]
 name = "mando-gateway"
-version = "0.1.21-beta.8"
+version = "0.1.21-beta.9"
 dependencies = [
  "anyhow",
  "api-types",
@@ -2417,7 +2420,7 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
 name = "scout"
-version = "0.1.21-beta.8"
+version = "0.1.21-beta.9"
 dependencies = [
  "anyhow",
  "api-types",
@@ -2558,7 +2561,7 @@ dependencies = [
 
 [[package]]
 name = "sessions"
-version = "0.1.21-beta.8"
+version = "0.1.21-beta.9"
 dependencies = [
  "anyhow",
  "api-types",
@@ -2575,7 +2578,7 @@ dependencies = [
 
 [[package]]
 name = "sessions-db"
-version = "0.1.21-beta.8"
+version = "0.1.21-beta.9"
 dependencies = [
  "anyhow",
  "global-db",
@@ -2587,7 +2590,7 @@ dependencies = [
 
 [[package]]
 name = "settings"
-version = "0.1.21-beta.8"
+version = "0.1.21-beta.9"
 dependencies = [
  "anyhow",
  "api-types",
@@ -3467,7 +3470,7 @@ dependencies = [
 
 [[package]]
 name = "transport-http"
-version = "0.1.21-beta.8"
+version = "0.1.21-beta.9"
 dependencies = [
  "anyhow",
  "api-types",
@@ -3501,7 +3504,7 @@ dependencies = [
 
 [[package]]
 name = "transport-tg"
-version = "0.1.21-beta.8"
+version = "0.1.21-beta.9"
 dependencies = [
  "anyhow",
  "api-types",
@@ -3520,7 +3523,7 @@ dependencies = [
 
 [[package]]
 name = "transport-ui"
-version = "0.1.21-beta.8"
+version = "0.1.21-beta.9"
 dependencies = [
  "anyhow",
  "libc",

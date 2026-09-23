@@ -57,6 +57,14 @@ pub(crate) struct DaemonClient(gateway_client::GatewayClient);
 
 impl DaemonClient {
     pub(crate) fn discover() -> Result<Self> {
+        Self::discover_with_client(reqwest::Client::new())
+    }
+
+    pub(crate) fn discover_with_timeout(timeout: std::time::Duration) -> Result<Self> {
+        Self::discover_with_client(reqwest::Client::builder().timeout(timeout).build()?)
+    }
+
+    fn discover_with_client(client: reqwest::Client) -> Result<Self> {
         let data_dir = data_dir();
         let port_file = data_dir.join("daemon.port");
         let dev_port_file = data_dir.join("daemon-dev.port");
@@ -85,7 +93,7 @@ impl DaemonClient {
         Ok(Self(gateway_client::GatewayClient::with_client(
             format!("http://127.0.0.1:{port}"),
             token,
-            reqwest::Client::new(),
+            client,
         )))
     }
 

@@ -399,6 +399,42 @@ pub mod routes {
         event: None,
     };
 
+    pub const GET_CREDENTIALS_LEASES: RouteDescriptor = RouteDescriptor {
+        method: api_types::RouteMethod::Get,
+        path: "/api/credentials/leases",
+        transport: api_types::RouteTransport::Json,
+        auth: api_types::RouteAuth::Protected,
+        params: None,
+        query: None,
+        body: None,
+        response: Some("api_types::CredentialLeaseCountsResponse"),
+        event: None,
+    };
+
+    pub const POST_CREDENTIALS_LEASES_HEARTBEAT: RouteDescriptor = RouteDescriptor {
+        method: api_types::RouteMethod::Post,
+        path: "/api/credentials/leases/heartbeat",
+        transport: api_types::RouteTransport::Json,
+        auth: api_types::RouteAuth::Protected,
+        params: None,
+        query: None,
+        body: Some("api_types::CredentialLeaseHeartbeatRequest"),
+        response: Some("api_types::CredentialLeaseResponse"),
+        event: None,
+    };
+
+    pub const POST_CREDENTIALS_LEASES_RELEASE: RouteDescriptor = RouteDescriptor {
+        method: api_types::RouteMethod::Post,
+        path: "/api/credentials/leases/release",
+        transport: api_types::RouteTransport::Json,
+        auth: api_types::RouteAuth::Protected,
+        params: None,
+        query: None,
+        body: Some("api_types::CredentialLeaseReleaseRequest"),
+        response: Some("api_types::CredentialLeaseResponse"),
+        event: None,
+    };
+
     pub const POST_CREDENTIALS_PICK: RouteDescriptor = RouteDescriptor {
         method: api_types::RouteMethod::Post,
         path: "/api/credentials/pick",
@@ -408,6 +444,30 @@ pub mod routes {
         query: None,
         body: Some("api_types::CredentialPickRequest"),
         response: Some("api_types::CredentialPickResponse"),
+        event: None,
+    };
+
+    pub const POST_CREDENTIALS_ROUTE: RouteDescriptor = RouteDescriptor {
+        method: api_types::RouteMethod::Post,
+        path: "/api/credentials/route",
+        transport: api_types::RouteTransport::Json,
+        auth: api_types::RouteAuth::Protected,
+        params: None,
+        query: None,
+        body: Some("api_types::CredentialRouteRequest"),
+        response: Some("api_types::CredentialRouteResponse"),
+        event: None,
+    };
+
+    pub const GET_CREDENTIALS_ROUTING: RouteDescriptor = RouteDescriptor {
+        method: api_types::RouteMethod::Get,
+        path: "/api/credentials/routing",
+        transport: api_types::RouteTransport::Json,
+        auth: api_types::RouteAuth::Protected,
+        params: None,
+        query: None,
+        body: None,
+        response: Some("api_types::CredentialRoutingStatusResponse"),
         event: None,
     };
 
@@ -1762,11 +1822,57 @@ pub mod routes {
             .await
         }
 
+        pub async fn get_credentials_leases(
+            &self,
+        ) -> Result<api_types::CredentialLeaseCountsResponse> {
+            self.get_json(&GET_CREDENTIALS_LEASES, GET_CREDENTIALS_LEASES.path)
+                .await
+        }
+
+        pub async fn post_credentials_leases_heartbeat(
+            &self,
+            body: &api_types::CredentialLeaseHeartbeatRequest,
+        ) -> Result<api_types::CredentialLeaseResponse> {
+            self.post_json(
+                &POST_CREDENTIALS_LEASES_HEARTBEAT,
+                POST_CREDENTIALS_LEASES_HEARTBEAT.path,
+                body,
+            )
+            .await
+        }
+
+        pub async fn post_credentials_leases_release(
+            &self,
+            body: &api_types::CredentialLeaseReleaseRequest,
+        ) -> Result<api_types::CredentialLeaseResponse> {
+            self.post_json(
+                &POST_CREDENTIALS_LEASES_RELEASE,
+                POST_CREDENTIALS_LEASES_RELEASE.path,
+                body,
+            )
+            .await
+        }
+
         pub async fn post_credentials_pick(
             &self,
             body: &api_types::CredentialPickRequest,
         ) -> Result<api_types::CredentialPickResponse> {
             self.post_json(&POST_CREDENTIALS_PICK, POST_CREDENTIALS_PICK.path, body)
+                .await
+        }
+
+        pub async fn post_credentials_route(
+            &self,
+            body: &api_types::CredentialRouteRequest,
+        ) -> Result<api_types::CredentialRouteResponse> {
+            self.post_json(&POST_CREDENTIALS_ROUTE, POST_CREDENTIALS_ROUTE.path, body)
+                .await
+        }
+
+        pub async fn get_credentials_routing(
+            &self,
+        ) -> Result<api_types::CredentialRoutingStatusResponse> {
+            self.get_json(&GET_CREDENTIALS_ROUTING, GET_CREDENTIALS_ROUTING.path)
                 .await
         }
 

@@ -294,7 +294,7 @@ export type CodexWarmupResponse = {
    */
   warmedAt: number;
   /**
-   * Model the prompt ran on; `None` when Codex's own default was used.
+   * Model the prompt ran on.
    */
   model: string | null;
   elapsedMs: number;
@@ -363,12 +363,59 @@ export type CredentialInfo = {
    */
   codex?: CodexCredentialDetails | null;
 };
+export type CredentialLeaseCount = {
+  credential_id: number;
+  live_sessions: number;
+  pending_launches: number;
+};
+export type CredentialLeaseCountsResponse = { profiles: Array<CredentialLeaseCount> };
+export type CredentialLeaseHeartbeatRequest = {
+  launch_id: string;
+  credential_id: number;
+  session_id: string | null;
+  pid: number;
+  cwd: string;
+  model: string | null;
+  /**
+   * Only the newly started child confirms its target reservation.
+   */
+  confirm_reservation: boolean;
+};
+export type CredentialLeaseReleaseRequest = { launch_id: string };
+export type CredentialLeaseResponse = { ok: boolean; expires_at: number | null };
 export type CredentialMutationResponse = { ok: boolean; error: string | null };
 export type CredentialPick = { id: number; label: string; token: string };
 export type CredentialPickRequest = { id?: number | null; label?: string | null };
 export type CredentialPickResponse = { pick: CredentialPick | null };
 export type CredentialProvider = 'claude' | 'codex';
 export type CredentialRateLimitStatus = 'allowed' | 'allowed_warning' | 'rejected';
+export type CredentialRouteCandidate = {
+  credential_id: number;
+  label: string;
+  eligible: boolean;
+  reason: string;
+  remaining_percent: number | null;
+  weekly_reset_at: number | null;
+  live_sessions: number;
+  pending_launches: number;
+  headroom_percent: number | null;
+  last_probed_at: number | null;
+};
+export type CredentialRouteRequest = {
+  launch_id: string;
+  current_credential_id: number | null;
+  profile: string | null;
+  model: string | null;
+  dry_run: boolean;
+  min_headroom_percent: number | null;
+};
+export type CredentialRouteResponse = {
+  pick: CredentialPick | null;
+  reason: string;
+  candidates: Array<CredentialRouteCandidate>;
+  reservation_expires_at: number | null;
+};
+export type CredentialRoutingStatusResponse = { candidates: Array<CredentialRouteCandidate> };
 export type CredentialTokenResponse = { token: string };
 export type CredentialUsageSnapshot = {
   fiveHour: CredentialWindowInfo;

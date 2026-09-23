@@ -13,6 +13,7 @@ mando captain tick	--dry-run
 mando captain triage	
 mando captain workers	-n,-w
 mando channels	
+mando claude	-a/--account/--label/--id
 mando codex	
 mando codex app-restore	
 mando codex app-status	--json
@@ -61,6 +62,7 @@ mando sessions messages	--last
 mando sessions stream	--type
 mando sessions tools	
 mando sessions transcript	
+mando switch	--dry-run
 mando tasks	--all
 mando todo	
 mando todo add	--context,--context-file,--glm-worker,--image,--json,--no-auto-merge,--no-pr,--plan,--provider,-p/--project

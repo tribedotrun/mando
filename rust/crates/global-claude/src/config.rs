@@ -95,11 +95,13 @@ pub struct CcConfig {
 impl Default for CcConfig {
     fn default() -> Self {
         Self {
-            // Pinned id, not the `fable` alias: aliases resolve through the
+            // Pinned id, not the `opus` alias: aliases resolve through the
             // installed CLI's table, so only a full id fixes the generation
             // (see captain-workflow.yaml::models).
-            model: "claude-fable-5-1".into(),
-            effort: Effort::High,
+            model: "claude-opus-5-5".into(),
+            // Explicit because Opus 5.5 runs at "medium" when `--effort` is
+            // absent; scout and ops inherit this value.
+            effort: Effort::XHigh,
             tools: None,
             allowed_tools: None,
             disallowed_tools: None,
