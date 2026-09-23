@@ -15,6 +15,9 @@ path = "src/main.rs"
 api-types = { path = "../crates/api-types" }
 gateway-client = { path = "../crates/gateway-client" }
 global-infra = { path = "../crates/global-infra" }
+global-claude = { path = "../crates/global-claude" }
+serde.workspace = true
+tempfile = "3"
 global-git = { path = "../crates/global-git" }
 global-types = { path = "../crates/global-types" }
 serde_json.workspace = true

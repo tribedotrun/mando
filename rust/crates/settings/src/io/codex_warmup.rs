@@ -42,7 +42,7 @@ pub const WARMUP_PROMPT: &str = "Reply with the single word OK.";
 /// Model every warm-up runs on. Pinned to the cheapest current Codex model
 /// rather than the captain workflow's worker model: the prompt only has to
 /// count as a request, so token cost is the only thing that matters.
-pub const WARMUP_MODEL: &str = "gpt-5.6-luna";
+pub const WARMUP_MODEL: &str = "gpt-6-luna";
 
 /// Result of a successful warm-up run.
 #[derive(Debug)]

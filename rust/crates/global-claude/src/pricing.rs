@@ -61,7 +61,8 @@ impl ModelRate {
 /// Id-specific arms run first: a generation whose price differs from its
 /// family's older members has to win before the family substring match
 /// catches it. Sonnet 5 is cheaper than Sonnet 4.x, so `claude-sonnet-5`
-/// must be tested before the plain `sonnet` arm.
+/// must be tested before the plain `sonnet` arm; `claude-opus-5-5` likewise
+/// precedes the plain `opus` arm.
 pub fn rate_for_model(model: &str) -> ModelRate {
     // Match on a lowercased copy so CC's mixed casing across versions
     // (`claude-opus-4-7`, `claude-sonnet-4-6`) lands in the same bucket
@@ -92,6 +93,16 @@ pub fn rate_for_model(model: &str) -> ModelRate {
             input_per_mtok: 2.0,
             output_per_mtok: 10.0,
             cache_creation_per_mtok: 2.5,
+            cache_read_per_mtok: 0.2,
+        };
+    }
+
+    // Opus 5.5 is priced below Opus 5 and 4.x; check the id before family.
+    if lower.contains("claude-opus-5-5") {
+        return ModelRate {
+            input_per_mtok: 4.0,
+            output_per_mtok: 20.0,
+            cache_creation_per_mtok: 5.0,
             cache_read_per_mtok: 0.2,
         };
     }
@@ -142,7 +153,7 @@ fn fable_rate() -> ModelRate {
 }
 
 /// Conservative default when the model string is missing or unrecognized.
-/// Uses fable rates — the most expensive tier we run — so unknown models do
+/// Uses fable rates — the most expensive public tier — so unknown models do
 /// not silently underreport cost.
 pub fn fallback_rate() -> ModelRate {
     fable_rate()

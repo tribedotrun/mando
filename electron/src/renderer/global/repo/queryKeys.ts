@@ -90,6 +90,7 @@ export const queryKeys = {
   credentials: {
     all: ['credentials'] as const,
     list: () => ['credentials', 'list'] as const,
+    routing: () => ['credentials', 'routing'] as const,
     codexResetCredits: (id: number) => ['credentials', 'codex-reset-credits', id] as const,
     codexLogin: () => ['credentials', 'codex-login'] as const,
   },

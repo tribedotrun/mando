@@ -7,15 +7,14 @@
 # Prompt templates use Jinja2 syntax: {{ variable }}, {% if %}, etc.
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Full model ids, not CLI aliases. `fable` / `opus` resolve through the
-# installed Claude Code's alias table (2.1.257: fable -> claude-fable-5-1,
-# opus -> claude-opus-5; builds before 2.1.257 map fable -> claude-fable-5),
-# so only a pinned id guarantees which generation runs and which rate
-# `global_claude::pricing` applies.
+# Full model ids, not CLI aliases. `opus` resolves through the installed
+# Claude Code's alias table (2.1.280: opus -> claude-opus-5-5; earlier builds
+# map it to claude-opus-5), so only a pinned id guarantees which generation
+# runs and which rate `global_claude::pricing` applies.
 models:
-  worker: "claude-fable-5-1"
-  captain: "claude-fable-5-1"
-  clarifier: "claude-fable-5-1"
+  worker: "claude-opus-5-5"
+  captain: "claude-opus-5-5"
+  clarifier: "claude-opus-5-5"
 
 # Tasks that opt into GLM route implementation work to OpenCode. Other phases
 # continue to use the task's provider and have no stage-routing configuration.
@@ -73,10 +72,10 @@ agent:
   # Thinking effort sent as `--effort` on captain's own Claude Code spawns:
   # workers, clarifiers, review and merge sessions. Scout and ops spawns do
   # not read this key — they take `CcConfig`'s built-in default, which is the
-  # same "high", so changing this here moves captain only.
-  # Scale: low | medium | high | xhigh | max. Fable 5.1's recommended start
-  # is "high"; raise per workload only where evals show a gain.
-  cc_effort: "high"
+  # same "xhigh", so changing this here moves captain only.
+  # Scale: low | medium | high | xhigh | max. Opus 5.5 defaults to "medium"
+  # when no effort is sent, so Mando always sends one explicitly.
+  cc_effort: "xhigh"
   no_pr_min_active_s: 180
 
 # Applied on top of the values above only when the daemon is launched with
@@ -110,10 +109,10 @@ sandbox:
   # e2e rework/escalation specs then drive from escalated → rework
   # without waiting out a 20+ minute nudge chain.
   max_interventions: 3
-  # Sandbox Codex tasks should be cheap and predictable: gpt-5.6-luna, medium
+  # Sandbox Codex tasks should be cheap and predictable: gpt-6-luna, medium
   # reasoning, and explicit standard routing (`default` means not fast).
   codex:
-    model: "gpt-5.6-luna"
+    model: "gpt-6-luna"
     reasoning_effort: "medium"
     service_tier: "default"
 

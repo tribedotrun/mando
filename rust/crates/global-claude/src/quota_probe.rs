@@ -1,8 +1,8 @@
 //! Read subscription windows from a minimal, isolated Claude print session.
 //!
-//! Claude Code 2.1.270 emits the Fable bucket as
-//! `unifiedWindows.seven_day_overage_included`. A Haiku inference request
-//! does not expose that bucket for setup-token credentials.
+//! The caller picks the model: the verdict reflects that model's capacity,
+//! and Claude Code 2.1.270+ emits the Fable weekly bucket as
+//! `unifiedWindows.seven_day_overage_included` only on a Fable turn.
 
 use std::process::Stdio;
 use std::time::Duration;
@@ -23,6 +23,7 @@ pub struct QuotaWindow {
 pub struct QuotaSnapshot {
     pub five_hour: QuotaWindow,
     pub seven_day: QuotaWindow,
+    /// Present only when the probe ran a Fable model.
     pub seven_day_fable: Option<QuotaWindow>,
     pub status: RateLimitStatus,
     pub representative_claim: Option<String>,
@@ -45,13 +46,16 @@ pub enum QuotaProbeError {
     Parse(String),
 }
 
-/// Run one no-tools Fable turn using only the supplied OAuth credential.
+/// Run one no-tools `model` turn using only the supplied OAuth credential.
 ///
 /// The temporary config and working directory exclude user/repository
 /// instructions, hooks, plugins, MCP servers, and persisted sessions. The
 /// child is killed if this future is cancelled or reaches its timeout.
 #[tracing::instrument(skip_all)]
-pub async fn probe_quota(access_token: &str) -> Result<QuotaSnapshot, QuotaProbeError> {
+pub async fn probe_quota(
+    access_token: &str,
+    model: &str,
+) -> Result<QuotaSnapshot, QuotaProbeError> {
     let directory = tempfile::Builder::new().prefix("mando-usage-").tempdir()?;
     let mut command = tokio::process::Command::new(crate::resolve_claude_binary());
     command.env_clear();
@@ -69,7 +73,7 @@ pub async fn probe_quota(access_token: &str) -> Result<QuotaSnapshot, QuotaProbe
             "-p",
             "Reply with OK.",
             "--model",
-            "claude-fable-5-1",
+            model,
             "--effort",
             "low",
             "--max-turns",

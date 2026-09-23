@@ -13,7 +13,7 @@
 
 use serde::{Deserialize, Deserializer};
 
-use crate::io::usage_probe::{ProbeError, UsageSnapshot, WindowState};
+use crate::io::usage_probe::{FableUsage, ProbeError, UsageSnapshot, WindowState};
 use global_types::RateLimitStatus;
 
 const USAGE_URL: &str = "https://chatgpt.com/backend-api/wham/usage";
@@ -157,7 +157,7 @@ fn parse_outcome(body: UsageResponse) -> Result<CodexProbeOutcome, ProbeError> {
 
     let snapshot = UsageSnapshot {
         five_hour: primary,
-        seven_day_fable: None,
+        seven_day_fable: FableUsage::Absent,
         seven_day: secondary,
         unified_status,
         representative_claim,

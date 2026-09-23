@@ -101,7 +101,7 @@ pub async fn bootstrap_gateway(
     let ops_default_model = if options.sandbox_mode || options.dev_mode {
         "haiku"
     } else {
-        "claude-fable-5-1"
+        "claude-opus-5-5"
     };
     let cc_state_dir = global_infra::paths::state_dir()
         .join("ops_sessions")

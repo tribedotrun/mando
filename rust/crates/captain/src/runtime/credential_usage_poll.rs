@@ -334,10 +334,6 @@ pub async fn probe_and_persist(
             // default — far too short for a weekly cap.
             let reset_at = match snapshot.representative_claim.as_deref() {
                 Some("five_hour") => snapshot.five_hour.reset_at,
-                Some("seven_day_overage_included") => snapshot
-                    .seven_day_fable
-                    .as_ref()
-                    .map_or(snapshot.seven_day.reset_at, |window| window.reset_at),
                 Some(s) if s.starts_with("seven_day") => snapshot.seven_day.reset_at,
                 _ => snapshot.five_hour.reset_at.max(snapshot.seven_day.reset_at),
             };

@@ -73,7 +73,7 @@ mando-gateway = [
 ]
 
 # CLI client (peer to Electron, HTTP-only)
-mando-cli = ["api-types", "gateway-client", "global-types", "global-infra", "global-git"]
+mando-cli = ["api-types", "gateway-client", "global-types", "global-infra", "global-git", "global-claude"]
 
 # Dev mocks (standalone, zero Mando deps)
 dev-tg-mock = []

@@ -32,6 +32,7 @@ pub(crate) fn protected_routes() -> ApiRouter<AppState> {
         .merge(routes_workbenches::routes())
         .merge(project_routes())
         .merge(routes_credentials::credential_routes())
+        .merge(crate::transport::routes_credential_routing::credential_routing_routes())
         .merge(routes_credentials_update::credential_update_routes())
         .merge(routes_credentials_codex::codex_credential_routes())
         .merge(routes_credentials_codex_app::codex_desktop_app_routes())

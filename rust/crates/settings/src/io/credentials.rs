@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use anyhow::Result;
 use sqlx::SqlitePool;
 
-use crate::io::usage_probe::UsageSnapshot;
+use crate::io::usage_probe::{FableUsage, UsageSnapshot};
 
 pub use crate::io::credential_types::{CredentialInfo, CredentialRow, CredentialWindowInfo};
 
@@ -227,8 +227,9 @@ pub async fn clear_rate_limit_cooldown(pool: &SqlitePool, id: i64) -> Result<boo
 
 /// Persist a probe snapshot on a credential row.
 ///
-/// Writes all usage windows atomically. An absent Fable window clears any
-/// previously reported Fable measurement. Callers that see
+/// Writes all usage windows atomically. `FableUsage::Absent` clears the
+/// stored Fable window; `FableUsage::Unknown` leaves it as last measured.
+/// Callers that see
 /// `snapshot.unified_status == Rejected` must also call
 /// [`set_rate_limit_cooldown`] (directly or via the existing
 /// `credential_rate_limit::activate`) so `pick_for_worker` filtering keeps
@@ -238,6 +239,7 @@ pub async fn set_usage_snapshot(
     id: i64,
     snapshot: &UsageSnapshot,
 ) -> Result<bool> {
+    let fable = snapshot.seven_day_fable.window();
     let result = sqlx::query(
         "UPDATE credentials SET
             five_hour_utilization = ?1,
@@ -249,11 +251,15 @@ pub async fn set_usage_snapshot(
             unified_status = ?7,
             representative_claim = ?8,
             last_probed_at = ?9,
-            seven_day_fable_utilization = ?10,
-            seven_day_fable_reset_at = ?11,
-            seven_day_fable_status = ?12,
+            seven_day_fable_utilization =
+                CASE WHEN ?12 THEN ?10 ELSE seven_day_fable_utilization END,
+            seven_day_fable_reset_at =
+                CASE WHEN ?12 THEN ?11 ELSE seven_day_fable_reset_at END,
+            seven_day_fable_status =
+                CASE WHEN ?12 THEN ?13 ELSE seven_day_fable_status END,
+            fable_last_probed_at = CASE WHEN ?12 THEN ?9 ELSE fable_last_probed_at END,
             updated_at = datetime('now')
-         WHERE id = ?13",
+         WHERE id = ?14",
     )
     .bind(snapshot.five_hour.utilization)
     .bind(snapshot.five_hour.reset_at)
@@ -264,24 +270,10 @@ pub async fn set_usage_snapshot(
     .bind(snapshot.unified_status.as_str())
     .bind(snapshot.representative_claim.as_deref())
     .bind(snapshot.probed_at)
-    .bind(
-        snapshot
-            .seven_day_fable
-            .as_ref()
-            .map(|window| window.utilization),
-    )
-    .bind(
-        snapshot
-            .seven_day_fable
-            .as_ref()
-            .map(|window| window.reset_at),
-    )
-    .bind(
-        snapshot
-            .seven_day_fable
-            .as_ref()
-            .map(|window| window.status.as_str()),
-    )
+    .bind(fable.map(|window| window.utilization))
+    .bind(fable.map(|window| window.reset_at))
+    .bind(!matches!(snapshot.seven_day_fable, FableUsage::Unknown))
+    .bind(fable.map(|window| window.status.as_str()))
     .bind(id)
     .execute(pool)
     .await?;
@@ -338,46 +330,35 @@ pub async fn cost_since(pool: &SqlitePool, credential_id: i64, since_unix_secs: 
     }
 }
 
-/// Pick an eligible Claude credential whose weekly allowance resets soonest.
-/// Unknown or elapsed reset times come last; ties use active sessions, then
-/// five-hour utilization and id. Returns (id, access_token).
-///
-/// The active-session tally is global across the pool: every running session
-/// on a credential counts, regardless of which caller opened it. There is one
-/// load-balancing bucket, so a clarifier, review, merge or rebase session
-/// weighs on a credential exactly as much as a worker session does.
+/// Route through the shared reset/headroom policy, including managed and external
+/// live processes. Managed callers do not own terminal launch reservations.
 pub async fn pick_for_worker(pool: &SqlitePool) -> Result<Option<(i64, String)>> {
-    let now_ms = time::OffsetDateTime::now_utc().unix_timestamp() * 1000;
-    let now_secs = now_ms / 1000;
-
-    // Keep the provider filter for databases that still contain stale Codex
-    // rows from the removed Credentials-page Codex account feature.
-    let row: Option<(i64, String)> = sqlx::query_as(
-        "SELECT c.id, c.access_token
-         FROM credentials c
-         LEFT JOIN (
-             SELECT credential_id, COUNT(*) AS active
-             FROM cc_sessions
-             WHERE status = 'running' AND credential_id IS NOT NULL
-             GROUP BY credential_id
-         ) s ON s.credential_id = c.id
-         WHERE c.provider = 'claude'
-           AND c.disabled_at IS NULL
-           AND c.cli_eligible = 1
-           AND (c.expires_at IS NULL OR c.expires_at > ?1)
-           AND (c.rate_limit_cooldown_until IS NULL OR c.rate_limit_cooldown_until <= ?2)
-         ORDER BY
-            CASE WHEN c.seven_day_reset_at > ?2 THEN c.seven_day_reset_at END ASC NULLS LAST,
-            COALESCE(s.active, 0) ASC,
-            COALESCE(c.five_hour_utilization, 0.0) ASC,
-            c.id ASC
-         LIMIT 1",
+    let result = super::credential_routing::route(
+        pool,
+        &api_types::CredentialRouteRequest {
+            launch_id: String::new(),
+            current_credential_id: None,
+            profile: None,
+            model: None,
+            dry_run: true,
+            min_headroom_percent: None,
+        },
     )
-    .bind(now_ms)
-    .bind(now_secs)
-    .fetch_optional(pool)
     .await?;
-    Ok(row)
+    match result.pick {
+        Some(pick) => {
+            let token: Option<String> = sqlx::query_scalar(
+                "UPDATE credentials SET last_picked_at=?1, updated_at=datetime('now')
+                 WHERE id=?2 AND provider='claude' RETURNING access_token",
+            )
+            .bind(time::OffsetDateTime::now_utc().unix_timestamp())
+            .bind(pick.id)
+            .fetch_optional(pool)
+            .await?;
+            Ok(token.map(|token| (pick.id, token)))
+        }
+        None => Ok(None),
+    }
 }
 
 /// Pick for a new CLI process. Ambient login is allowed only without a managed pool.

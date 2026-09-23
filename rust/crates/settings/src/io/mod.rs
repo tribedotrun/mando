@@ -19,3 +19,6 @@ pub mod usage_probe;
 
 pub(crate) mod claude_desktop_profile;
 pub(crate) mod claude_desktop_sessions;
+
+pub(crate) mod credential_leases;
+pub(crate) mod credential_routing;

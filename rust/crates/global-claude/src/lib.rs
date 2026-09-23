@@ -3,6 +3,7 @@ mod broken_session;
 mod config;
 mod credentials;
 mod error;
+mod interactive;
 mod json_parse;
 mod message;
 mod oneshot;
@@ -28,6 +29,7 @@ pub use broken_session::{stream_broken_session_symptom, BrokenSessionMatch, Brok
 pub use config::{CcConfig, CcConfigBuilder, Effort, PermissionMode};
 pub use credentials::{credential_id, with_credential};
 pub use error::{CcError, ErrorClass};
+pub use interactive::{hook_command, hook_settings_path, InteractiveLaunch, InteractiveStart};
 pub use json_parse::{parse_llm_json, parse_llm_json_as};
 pub use message::{
     AssistantMessage, CcMessage, ContentBlock, InitMessage, RateLimitEvent, RateLimitStatus,

@@ -266,6 +266,29 @@ export interface Routes {
     params: Types.CredentialIdParams;
     res: Types.CodexWarmupResponse;
   };
+  getCredentialsLeases: {
+    method: 'GET';
+    path: '/api/credentials/leases';
+    transport: 'json';
+    auth: 'protected';
+    res: Types.CredentialLeaseCountsResponse;
+  };
+  postCredentialsLeasesHeartbeat: {
+    method: 'POST';
+    path: '/api/credentials/leases/heartbeat';
+    transport: 'json';
+    auth: 'protected';
+    body: Types.CredentialLeaseHeartbeatRequest;
+    res: Types.CredentialLeaseResponse;
+  };
+  postCredentialsLeasesRelease: {
+    method: 'POST';
+    path: '/api/credentials/leases/release';
+    transport: 'json';
+    auth: 'protected';
+    body: Types.CredentialLeaseReleaseRequest;
+    res: Types.CredentialLeaseResponse;
+  };
   postCredentialsPick: {
     method: 'POST';
     path: '/api/credentials/pick';
@@ -273,6 +296,21 @@ export interface Routes {
     auth: 'protected';
     body: Types.CredentialPickRequest;
     res: Types.CredentialPickResponse;
+  };
+  postCredentialsRoute: {
+    method: 'POST';
+    path: '/api/credentials/route';
+    transport: 'json';
+    auth: 'protected';
+    body: Types.CredentialRouteRequest;
+    res: Types.CredentialRouteResponse;
+  };
+  getCredentialsRouting: {
+    method: 'GET';
+    path: '/api/credentials/routing';
+    transport: 'json';
+    auth: 'protected';
+    res: Types.CredentialRoutingStatusResponse;
   };
   postCredentialsSetuptoken: {
     method: 'POST';
@@ -1213,9 +1251,39 @@ export const routes = {
     transport: 'json',
     auth: 'protected',
   },
+  getCredentialsLeases: {
+    method: 'GET',
+    path: '/api/credentials/leases',
+    transport: 'json',
+    auth: 'protected',
+  },
+  postCredentialsLeasesHeartbeat: {
+    method: 'POST',
+    path: '/api/credentials/leases/heartbeat',
+    transport: 'json',
+    auth: 'protected',
+  },
+  postCredentialsLeasesRelease: {
+    method: 'POST',
+    path: '/api/credentials/leases/release',
+    transport: 'json',
+    auth: 'protected',
+  },
   postCredentialsPick: {
     method: 'POST',
     path: '/api/credentials/pick',
+    transport: 'json',
+    auth: 'protected',
+  },
+  postCredentialsRoute: {
+    method: 'POST',
+    path: '/api/credentials/route',
+    transport: 'json',
+    auth: 'protected',
+  },
+  getCredentialsRouting: {
+    method: 'GET',
+    path: '/api/credentials/routing',
     transport: 'json',
     auth: 'protected',
   },

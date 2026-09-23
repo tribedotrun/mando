@@ -29,3 +29,5 @@ pub use settings_runtime::{ApplyConfigError, SettingsError, SettingsRuntime};
 
 mod claude_desktop_runtime;
 pub use claude_desktop_runtime::ClaudeDesktopProfileError;
+
+mod credential_routing_runtime;

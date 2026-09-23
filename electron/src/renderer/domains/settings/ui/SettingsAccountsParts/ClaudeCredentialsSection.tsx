@@ -7,7 +7,10 @@ import {
   ClaudeCredentialRow,
   ShowAddButton,
 } from '#renderer/domains/settings/ui/SettingsAccountsParts';
-import type { CredentialInfo } from '#renderer/domains/settings/runtime/hooks';
+import {
+  useCredentialRouting,
+  type CredentialInfo,
+} from '#renderer/domains/settings/runtime/hooks';
 
 interface ClaudeCredentialsSectionProps {
   items: CredentialInfo[];
@@ -30,6 +33,7 @@ export function ClaudeCredentialsSection({
   removePending,
   setDisabledPending,
 }: ClaudeCredentialsSectionProps): React.ReactElement {
+  const leases = useCredentialRouting();
   return (
     <div data-testid="settings-credentials-claude" className="space-y-4">
       <div>
@@ -39,13 +43,24 @@ export function ClaudeCredentialsSection({
           CLI load balancing; each Desktop login shares your local Claude files and memory.
         </p>
         <p className="mt-1 text-xs text-muted-foreground">
-          Available credentials nearest their weekly reset are used first. Usage refreshes every
-          three hours; use a credential’s refresh button to update it sooner.
+          CLI switching prefers accounts near their weekly reset with room for another session.
+          Accounts with similar reset times are balanced by remaining quota and tracked session
+          load.
+        </p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          In a supervised Claude session, use <code>!mando switch</code> to choose an account or{' '}
+          <code>!mando switch --dry-run</code> to see the routing decision. Type <code>/exit</code>{' '}
+          after queuing a switch to resume the conversation with the selected account.
         </p>
         <p className="mt-1 text-xs text-muted-foreground">
           Local session import is optional under Manage. Opening Desktop does not import sessions.
           Cloud history stays with its account; Desktop requests are not automatically rotated.
         </p>
+        {leases.isError ? (
+          <p className="mt-1 text-xs text-destructive" role="status">
+            Live session counts are unavailable: {leases.error.message}
+          </p>
+        ) : null}
       </div>
       <Card className="py-4">
         <CardContent>
@@ -65,6 +80,9 @@ export function ClaudeCredentialsSection({
                 <ClaudeCredentialRow
                   key={cred.id}
                   cred={cred}
+                  leaseCount={leases.data?.candidates.find(
+                    (profile) => profile.credential_id === cred.id,
+                  )}
                   onRemove={() => onRemove(cred.id)}
                   onSetDisabled={(disabled) => onSetDisabled(cred.id, disabled)}
                   removePending={removePending}

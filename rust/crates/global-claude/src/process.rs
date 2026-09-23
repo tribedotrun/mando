@@ -8,12 +8,12 @@ use anyhow::{Context, Result};
 use crate::config::CcConfig;
 use crate::error::CcError;
 
-/// Subagents inherit the parent model by default. Mando pins them to Opus 5
+/// Subagents inherit the parent model by default. Mando pins them to Opus 5.5
 /// with the 1M context window so a worker never fans out onto a cheaper,
 /// 200k-window model (task 180 landed a screenshot-heavy web lane on Sonnet
 /// 4.6 and compacted twice). `config.env` is applied afterwards and may
 /// override it per call.
-const SUBAGENT_MODEL: &str = "claude-opus-5[1m]";
+const SUBAGENT_MODEL: &str = "claude-opus-5-5[1m]";
 
 /// Environment shared by attached and detached Claude Code spawns.
 fn apply_process_env(cmd: &mut tokio::process::Command, config: &CcConfig) {
