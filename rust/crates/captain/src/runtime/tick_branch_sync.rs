@@ -6,14 +6,17 @@
 
 use crate::Task;
 
-/// Sync branch names from worktrees for all items with a worktree.
+/// Sync branch names from worktrees for non-finalized items with a worktree.
 ///
-/// Runs unconditionally (even for items with PRs) so that `item.branch`
+/// Runs even for items with PRs so that `item.branch`
 /// is always populated after a daemon restart (the column is no longer
 /// in the DB). Skips detached HEAD state.
 #[tracing::instrument(skip_all)]
 pub(crate) async fn sync_branches(items: &mut [Task]) {
     for item in items.iter_mut() {
+        if item.status().is_finalized() {
+            continue;
+        }
         let Some(worktree) = item.worktree.as_deref() else {
             continue;
         };
