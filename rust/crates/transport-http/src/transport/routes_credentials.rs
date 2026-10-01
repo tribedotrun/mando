@@ -175,6 +175,7 @@ async fn list_credentials(
             representative_claim: cred.representative_claim,
             last_probed_at: cred.last_probed_at,
             cost_since_probe_usd: cred.cost_since_probe_usd,
+            claude_subscription: cred.claude_subscription,
             codex: cred.codex.map(|c| api_types::CodexCredentialDetails {
                 account_id: c.account_id,
                 plan_type: c.plan_type,

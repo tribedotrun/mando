@@ -93,6 +93,8 @@ export const queryKeys = {
     routing: () => ['credentials', 'routing'] as const,
     codexResetCredits: (id: number) => ['credentials', 'codex-reset-credits', id] as const,
     codexLogin: () => ['credentials', 'codex-login'] as const,
+    claudeSubscriptionRefresh: (id: number) =>
+      ['credentials', 'claude-subscription-refresh', id] as const,
   },
 
   // ── Codex desktop app (native account swap) ──
@@ -106,6 +108,7 @@ export const queryKeys = {
     all: ['claudeDesktopApp'] as const,
     status: (credentialId: number) => ['claudeDesktopApp', 'status', credentialId] as const,
     action: () => ['claudeDesktopApp', 'action'] as const,
+    authorizeKeychain: () => ['claudeDesktopApp', 'authorize-keychain'] as const,
   },
 
   // ── Highlighter ──

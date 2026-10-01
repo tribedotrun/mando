@@ -221,6 +221,9 @@ export const clarifyResponseSchema = z
 export const classifyRuleSchema = z
   .object({ category: z.string(), patterns: z.array(z.string()) })
   .strict();
+export const claudeDesktopKeychainAuthorizationSchema = z
+  .object({ authorized: z.boolean() })
+  .strict();
 export const claudeDesktopProfileAdoptRequestSchema = z
   .object({ credentialId: z.number(), userDataDir: z.string() })
   .strict();
@@ -262,6 +265,21 @@ export const claudeProgressKindSchema = z.enum([
   'code_change_published',
   'vcs_state_changed',
 ]);
+export const claudeSubscriptionInfoSchema = z
+  .object({
+    planName: z.string().nullable(),
+    billingInterval: z.string().nullable(),
+    status: z.string().nullable(),
+    renewsAt: z.number().nullable(),
+    endsAt: z.number().nullable(),
+    endsBefore: z.string().nullable(),
+    nextChargeDate: z.string().nullable(),
+    checkedAt: z.number().nullable(),
+    attemptedAt: z.number().nullable(),
+    error: z.string().nullable(),
+    keychainAccessRequired: z.boolean(),
+  })
+  .strict();
 export const clientLogBatchRequestSchema = z
   .object({ entries: z.array(z.lazy(() => clientLogEntrySchema)) })
   .strict();
@@ -457,6 +475,10 @@ export const credentialInfoSchema = z
     costSinceProbeUsd: z.number().nullable().optional(),
     codex: z
       .lazy(() => codexCredentialDetailsSchema)
+      .nullable()
+      .optional(),
+    claudeSubscription: z
+      .lazy(() => claudeSubscriptionInfoSchema)
       .nullable()
       .optional(),
   })
@@ -2329,9 +2351,11 @@ export const resSchemas = {
   postCredentialsByIdProbe: probeCredentialResponseSchema,
   postCredentialsByIdToken: updateCredentialTokenResponseSchema,
   postCredentialsClaudeDesktopAdopt: claudeDesktopProfileStatusSchema,
+  postCredentialsClaudeDesktopAuthorizekeychain: claudeDesktopKeychainAuthorizationSchema,
   postCredentialsClaudeDesktopOpen: claudeDesktopProfileStatusSchema,
   postCredentialsClaudeDesktopPreviewsessions: claudeDesktopSessionSyncResponseSchema,
   postCredentialsClaudeDesktopSetup: claudeDesktopProfileStatusSchema,
+  postCredentialsClaudeDesktopSubscriptionRefresh: claudeSubscriptionInfoSchema,
   postCredentialsClaudeDesktopSyncsessions: claudeDesktopSessionSyncResponseSchema,
   postCredentialsCodex: addCodexCredentialResponseSchema,
   postCredentialsCodexAppRestore: codexDesktopAppOperationResponseSchema,
@@ -2409,9 +2433,11 @@ export const bodySchemas = {
   postCredentialsByIdProbe: emptyRequestSchema,
   postCredentialsByIdToken: updateCredentialTokenRequestSchema,
   postCredentialsClaudeDesktopAdopt: claudeDesktopProfileAdoptRequestSchema,
+  postCredentialsClaudeDesktopAuthorizekeychain: emptyRequestSchema,
   postCredentialsClaudeDesktopOpen: claudeDesktopProfileRequestSchema,
   postCredentialsClaudeDesktopPreviewsessions: claudeDesktopSessionImportRequestSchema,
   postCredentialsClaudeDesktopSetup: claudeDesktopProfileRequestSchema,
+  postCredentialsClaudeDesktopSubscriptionRefresh: claudeDesktopProfileRequestSchema,
   postCredentialsClaudeDesktopSyncsessions: claudeDesktopSessionImportRequestSchema,
   postCredentialsCodex: addCodexCredentialRequestSchema,
   postCredentialsCodexAppRestore: codexDesktopAppRestoreRequestSchema,

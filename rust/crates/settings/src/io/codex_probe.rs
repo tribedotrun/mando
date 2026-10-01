@@ -5,8 +5,7 @@
 //! and returns the same `UsageSnapshot` shape Claude's probe produces so
 //! `pick_for_worker` keeps one query.
 //!
-//! The endpoint was confirmed by live probe against two real auth.json
-//! files (`b_aburra` + `b_gmail` accounts on this developer's machine).
+//! The endpoint was confirmed by live probes with authenticated accounts.
 //! Codex CLI's source ships a test fixture at `/api/codex/usage` but that
 //! path returns 403 from production Cloudflare; only `/backend-api/wham/usage`
 //! actually responds.

@@ -1,5 +1,6 @@
 //! Settings runtime orchestration.
 
+mod claude_subscription_runtime;
 mod codex_add_guardrails;
 mod codex_add_persist;
 mod codex_add_refresh;

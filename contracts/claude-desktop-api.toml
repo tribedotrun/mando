@@ -1,0 +1,17 @@
+[contract]
+name        = "claude-desktop-api"
+kind        = "external"
+types-crate = "rust/crates/settings"
+transports  = ["http"]
+base-url    = "https://claude.ai"
+hosts       = ["claude.ai"]
+docs        = "https://support.claude.com/en/articles/8325618-paid-plan-billing-faqs"
+
+# Private Desktop endpoints, verified against authenticated sessions. Credentials
+# come from the linked Desktop profile, never the inference-only CLI token.
+[[consumer]]
+name        = "claude-desktop-subscription"
+path        = "rust/crates/settings/src/io/claude_subscription_probe.rs"
+transports  = ["http"]
+role        = "GET account, organizations, organization plan and subscription_details"
+enforcement = "scanner"

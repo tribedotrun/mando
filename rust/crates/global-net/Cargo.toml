@@ -8,6 +8,8 @@ license.workspace = true
 global-infra = { path = "../global-infra" }
 reqwest.workspace = true
 tracing.workspace = true
+wreq = { version = "0.15.3", features = ["stream", "gzip", "brotli", "deflate"] }
+wreq-util = "0.1.0"
 
 [lints]
 workspace = true

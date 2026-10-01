@@ -1,4 +1,6 @@
+mod browser_http;
 pub mod http;
 
+pub use browser_http::claude_desktop_client;
 pub use http::shared_client;
 pub use http::sse_client;

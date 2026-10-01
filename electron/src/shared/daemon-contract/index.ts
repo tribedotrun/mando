@@ -147,6 +147,7 @@ export type ClarifyResponse = {
   error: string | null;
 };
 export type ClassifyRule = { category: string; patterns: Array<string> };
+export type ClaudeDesktopKeychainAuthorization = { authorized: boolean };
 export type ClaudeDesktopProfileAdoptRequest = { credentialId: number; userDataDir: string };
 export type ClaudeDesktopProfileRequest = { credentialId: number };
 export type ClaudeDesktopProfileState =
@@ -184,6 +185,34 @@ export type ClaudeProgressKind =
   | 'task_updated'
   | 'code_change_published'
   | 'vcs_state_changed';
+export type ClaudeSubscriptionInfo = {
+  planName: string | null;
+  billingInterval: string | null;
+  /**
+   * Provider-owned subscription status (separate from credential status).
+   */
+  status: string | null;
+  /**
+   * Unix milliseconds. A scheduled end takes precedence over renewal.
+   */
+  renewsAt: number | null;
+  endsAt: number | null;
+  /**
+   * Provider calendar dates, used only when precise timestamps are absent.
+   */
+  endsBefore: string | null;
+  nextChargeDate: string | null;
+  /**
+   * Unix milliseconds of the last complete successful refresh.
+   */
+  checkedAt: number | null;
+  /**
+   * Unix milliseconds of the latest attempt, including failed attempts.
+   */
+  attemptedAt: number | null;
+  error: string | null;
+  keychainAccessRequired: boolean;
+};
 export type ClientLogBatchRequest = { entries: Array<ClientLogEntry> };
 export type ClientLogBatchResponse = { accepted: number };
 export type ClientLogContext = {
@@ -362,6 +391,10 @@ export type CredentialInfo = {
    * Set only when `provider == Codex`.
    */
   codex?: CodexCredentialDetails | null;
+  /**
+   * Subscription metadata from the linked Claude Desktop account.
+   */
+  claudeSubscription?: ClaudeSubscriptionInfo | null;
 };
 export type CredentialLeaseCount = {
   credential_id: number;

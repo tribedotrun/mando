@@ -5,7 +5,7 @@
 
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use clap::Parser;
 use tracing::{error, info, warn};
@@ -44,6 +44,11 @@ struct Args {
     #[arg(long)]
     no_telegram: bool,
 }
+
+/// Upper bound for each drain step after the shutdown sequence has run (open
+/// HTTP connections, then tracked spawns). Supervisors escalate to SIGKILL a
+/// few seconds after SIGTERM, which would skip the PID/port file cleanup below.
+const SHUTDOWN_STEP_TIMEOUT: Duration = Duration::from_secs(3);
 
 #[tokio::main]
 async fn main() {
@@ -170,6 +175,7 @@ async fn main() {
     let ui_rt = state.ui_runtime.clone();
     let tracker = state.task_tracker.clone();
     let cancel = state.cancellation_token.clone();
+    let http_drain = state.http_drain.clone();
     let app = mando_gateway::build_router(state);
     let addr: SocketAddr = match format!("127.0.0.1:{port}").parse() {
         Ok(a) => a,
@@ -184,13 +190,16 @@ async fn main() {
     // 1. Receive signal, cancel cooperative loops
     // 2. Shutdown TG (needs service layer alive for in-flight updates)
     // 3. Shutdown UI (SIGTERM Electron, wait up to 5s)
-    // 4. Close HTTP server (drain in-flight requests)
+    // 4. Close HTTP server (end SSE streams, drain in-flight requests)
     // 5. Drain tracked spawns
     // 6. Exit
     //
-    // TG and UI shutdown happen INSIDE the graceful_shutdown closure so they
-    // run before axum tries to drain SSE connections (Electron holds an SSE
-    // connection that would block drain indefinitely if we killed it after).
+    // TG and UI shutdown happen INSIDE the graceful_shutdown future, while
+    // the listener still accepts, so both can finish their calls into this
+    // daemon. Once the future resolves axum stops accepting and `http_drain`
+    // ends every SSE stream; steps 4 and 5 are each bounded by
+    // SHUTDOWN_STEP_TIMEOUT.
+    let shutdown_drain = http_drain.clone();
     let shutdown = async move {
         shutdown_signal().await;
         // Cancel cooperative loops FIRST so auto-tick and request handlers
@@ -212,16 +221,32 @@ async fn main() {
         mando_gateway::signal_cc_subprocesses_for_shutdown().await;
         tg_rt.shutdown().await;
         ui_rt.shutdown().await;
+        shutdown_drain.cancel();
+    };
+    // A connection that outlives the drain (a client that never closes its
+    // keep-alive, a handler that never returns) must not keep the daemon up.
+    let drain_deadline = async {
+        http_drain.cancelled().await;
+        tokio::time::sleep(SHUTDOWN_STEP_TIMEOUT).await;
     };
     // Capture any serve-side failure but don't short-circuit cleanup —
     // we still need tracker/qa_mgr shutdown to flush state
     // before the process leaves. The exit-code decision is deferred to
     // the very end so launchd / supervising processes still see a
     // non-zero status when the HTTP server errored unexpectedly.
-    let serve_error = axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown)
-        .await
-        .err();
+    let serve_error = tokio::select! {
+        served = axum::serve(listener, app).with_graceful_shutdown(shutdown) => {
+            info!("HTTP server stopped");
+            served.err()
+        }
+        () = drain_deadline => {
+            warn!(
+                timeout_s = SHUTDOWN_STEP_TIMEOUT.as_secs(),
+                "HTTP drain timed out; dropping connections still open"
+            );
+            None
+        }
+    };
     if let Some(ref e) = serve_error {
         tracing::error!(target: "mando-gateway", module = "mando-gateway", %e, "axum server exited with error");
     }
@@ -229,7 +254,16 @@ async fn main() {
     // Drain all tracked spawns before tearing down the runtime so fire-and-
     // forget work gets a clean exit.
     tracker.close();
-    tracker.wait().await;
+    if tokio::time::timeout(SHUTDOWN_STEP_TIMEOUT, tracker.wait())
+        .await
+        .is_err()
+    {
+        warn!(
+            remaining = tracker.len(),
+            timeout_s = SHUTDOWN_STEP_TIMEOUT.as_secs(),
+            "tracked tasks still running at shutdown; abandoning them"
+        );
+    }
 
     // Shut down persistent Q&A sessions (kills CC child processes).
     qa_mgr.shutdown().await;

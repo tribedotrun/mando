@@ -91,7 +91,18 @@ impl SseConsumer {
             let mut logged_initial_wait = false;
 
             loop {
-                match connect_and_stream(&client, &url, token.as_deref(), &tx).await {
+                // The receiver owns this task: once the caller drops it, close
+                // the connection now instead of on the next envelope, which may
+                // never come. An idle stream held against the daemon's own port
+                // otherwise blocks its graceful HTTP drain forever.
+                let streamed = tokio::select! {
+                    () = tx.closed() => break,
+                    streamed = connect_and_stream(&client, &url, token.as_deref(), &tx) => streamed,
+                };
+                if tx.is_closed() {
+                    break;
+                }
+                match streamed {
                     Ok(()) => {
                         tracing::info!(
                             module = "gateway-client-sse",
@@ -119,15 +130,14 @@ impl SseConsumer {
                     }
                 }
 
-                if tx.is_closed() {
-                    tracing::debug!("SSE receiver dropped, stopping consumer");
-                    return;
+                tokio::select! {
+                    () = tx.closed() => break,
+                    () = tokio::time::sleep(backoff) => {}
                 }
-
-                tokio::time::sleep(backoff).await;
                 let _send_result = tx.send(SseSignal::Reconnected).await;
                 tracing::info!(module = "gateway-client-sse", "SSE reconnecting to {url}");
             }
+            tracing::debug!("SSE receiver dropped, stopping consumer");
         });
 
         Ok(rx)
