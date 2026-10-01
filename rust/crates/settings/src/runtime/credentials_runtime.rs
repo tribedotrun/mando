@@ -13,9 +13,19 @@ impl SettingsRuntime {
     pub async fn list_credentials(&self) -> Vec<crate::io::credentials::CredentialInfo> {
         match crate::io::credentials::list_all(&self.db_pool).await {
             Ok(rows) => {
+                let mut subscriptions = match self.subscription_infos().await {
+                    Ok(infos) => infos,
+                    Err(error) => {
+                        tracing::error!(module="claude-subscription", %error, "Failed to read subscription cache");
+                        rows.iter().filter(|row| row.provider=="claude").map(|row|
+                            (row.id, super::claude_subscription_runtime::unavailable("Unable to read subscription details. Refresh the plan to retry.".into()))
+                        ).collect()
+                    }
+                };
                 let mut out = Vec::with_capacity(rows.len());
                 for row in rows {
                     let mut info = row.to_info();
+                    info.claude_subscription = subscriptions.remove(&row.id);
                     if let Some(last) = row.last_probed_at {
                         let cost =
                             crate::io::credentials::cost_since(&self.db_pool, row.id, last).await;

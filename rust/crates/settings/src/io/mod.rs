@@ -17,8 +17,11 @@ pub mod projects;
 pub mod provider_probe;
 pub mod usage_probe;
 
+pub(crate) mod claude_desktop_auth;
 pub(crate) mod claude_desktop_profile;
 pub(crate) mod claude_desktop_sessions;
+pub(crate) mod claude_subscription_probe;
+pub(crate) mod claude_subscription_store;
 
 pub(crate) mod credential_leases;
 pub(crate) mod credential_routing;

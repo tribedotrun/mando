@@ -16,6 +16,10 @@ pub struct AppState {
     pub listen_port: u16,
     pub task_tracker: TaskTracker,
     pub cancellation_token: CancellationToken,
+    /// Cancelled once the HTTP server stops accepting connections and starts
+    /// its graceful drain. Long-lived responses (SSE) end on it so a
+    /// subscriber that never disconnects cannot hold shutdown open.
+    pub http_drain: CancellationToken,
     pub telegram_runtime: Arc<transport_tg::TelegramRuntime>,
     pub ui_runtime: Arc<transport_ui::UiRuntime>,
 }

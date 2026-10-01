@@ -129,6 +129,14 @@ export interface Routes {
     body: Types.ClaudeDesktopProfileAdoptRequest;
     res: Types.ClaudeDesktopProfileStatus;
   };
+  postCredentialsClaudeDesktopAuthorizekeychain: {
+    method: 'POST';
+    path: '/api/credentials/claude/desktop/authorize-keychain';
+    transport: 'json';
+    auth: 'protected';
+    body: Types.EmptyRequest;
+    res: Types.ClaudeDesktopKeychainAuthorization;
+  };
   postCredentialsClaudeDesktopOpen: {
     method: 'POST';
     path: '/api/credentials/claude/desktop/open';
@@ -160,6 +168,14 @@ export interface Routes {
     auth: 'protected';
     query: Types.ClaudeDesktopProfileRequest;
     res: Types.ClaudeDesktopProfileStatus;
+  };
+  postCredentialsClaudeDesktopSubscriptionRefresh: {
+    method: 'POST';
+    path: '/api/credentials/claude/desktop/subscription/refresh';
+    transport: 'json';
+    auth: 'protected';
+    body: Types.ClaudeDesktopProfileRequest;
+    res: Types.ClaudeSubscriptionInfo;
   };
   postCredentialsClaudeDesktopSyncsessions: {
     method: 'POST';
@@ -1149,6 +1165,12 @@ export const routes = {
     transport: 'json',
     auth: 'protected',
   },
+  postCredentialsClaudeDesktopAuthorizekeychain: {
+    method: 'POST',
+    path: '/api/credentials/claude/desktop/authorize-keychain',
+    transport: 'json',
+    auth: 'protected',
+  },
   postCredentialsClaudeDesktopOpen: {
     method: 'POST',
     path: '/api/credentials/claude/desktop/open',
@@ -1170,6 +1192,12 @@ export const routes = {
   getCredentialsClaudeDesktopStatus: {
     method: 'GET',
     path: '/api/credentials/claude/desktop/status',
+    transport: 'json',
+    auth: 'protected',
+  },
+  postCredentialsClaudeDesktopSubscriptionRefresh: {
+    method: 'POST',
+    path: '/api/credentials/claude/desktop/subscription/refresh',
     transport: 'json',
     auth: 'protected',
   },

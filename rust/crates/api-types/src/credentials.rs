@@ -51,6 +51,10 @@ pub struct CredentialInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional = nullable)]
     pub codex: Option<CodexCredentialDetails>,
+    /// Subscription metadata from the linked Claude Desktop account.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub claude_subscription: Option<crate::ClaudeSubscriptionInfo>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, TS)]

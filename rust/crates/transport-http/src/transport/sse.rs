@@ -88,8 +88,14 @@ pub(crate) async fn sse_events(
         }
     });
 
-    // Prepend snapshot, then live events.
-    let combined = snapshot_stream.chain(event_stream);
+    // Prepend snapshot, then live events. The bus never closes, so end the
+    // stream when the server starts draining; otherwise graceful shutdown
+    // waits on every subscriber that stays connected (an updating Electron,
+    // an in-process consumer, an external tail).
+    let combined = futures_util::StreamExt::take_until(
+        snapshot_stream.chain(event_stream),
+        state.http_drain.cancelled_owned(),
+    );
 
     Sse::new(combined).keep_alive(
         KeepAlive::new()

@@ -195,6 +195,19 @@ pub mod routes {
         event: None,
     };
 
+    pub const POST_CREDENTIALS_CLAUDE_DESKTOP_AUTHORIZEKEYCHAIN: RouteDescriptor =
+        RouteDescriptor {
+            method: api_types::RouteMethod::Post,
+            path: "/api/credentials/claude/desktop/authorize-keychain",
+            transport: api_types::RouteTransport::Json,
+            auth: api_types::RouteAuth::Protected,
+            params: None,
+            query: None,
+            body: Some("api_types::EmptyRequest"),
+            response: Some("api_types::ClaudeDesktopKeychainAuthorization"),
+            event: None,
+        };
+
     pub const POST_CREDENTIALS_CLAUDE_DESKTOP_OPEN: RouteDescriptor = RouteDescriptor {
         method: api_types::RouteMethod::Post,
         path: "/api/credentials/claude/desktop/open",
@@ -242,6 +255,19 @@ pub mod routes {
         response: Some("api_types::ClaudeDesktopProfileStatus"),
         event: None,
     };
+
+    pub const POST_CREDENTIALS_CLAUDE_DESKTOP_SUBSCRIPTION_REFRESH: RouteDescriptor =
+        RouteDescriptor {
+            method: api_types::RouteMethod::Post,
+            path: "/api/credentials/claude/desktop/subscription/refresh",
+            transport: api_types::RouteTransport::Json,
+            auth: api_types::RouteAuth::Protected,
+            params: None,
+            query: None,
+            body: Some("api_types::ClaudeDesktopProfileRequest"),
+            response: Some("api_types::ClaudeSubscriptionInfo"),
+            event: None,
+        };
 
     pub const POST_CREDENTIALS_CLAUDE_DESKTOP_SYNCSESSIONS: RouteDescriptor = RouteDescriptor {
         method: api_types::RouteMethod::Post,
@@ -1620,6 +1646,17 @@ pub mod routes {
             .await
         }
 
+        pub async fn post_credentials_claude_desktop_authorizekeychain(
+            &self,
+        ) -> Result<api_types::ClaudeDesktopKeychainAuthorization> {
+            self.post_json(
+                &POST_CREDENTIALS_CLAUDE_DESKTOP_AUTHORIZEKEYCHAIN,
+                POST_CREDENTIALS_CLAUDE_DESKTOP_AUTHORIZEKEYCHAIN.path,
+                &api_types::EmptyRequest {},
+            )
+            .await
+        }
+
         pub async fn post_credentials_claude_desktop_open(
             &self,
             body: &api_types::ClaudeDesktopProfileRequest,
@@ -1664,6 +1701,18 @@ pub mod routes {
                 &GET_CREDENTIALS_CLAUDE_DESKTOP_STATUS,
                 GET_CREDENTIALS_CLAUDE_DESKTOP_STATUS.path,
                 query,
+            )
+            .await
+        }
+
+        pub async fn post_credentials_claude_desktop_subscription_refresh(
+            &self,
+            body: &api_types::ClaudeDesktopProfileRequest,
+        ) -> Result<api_types::ClaudeSubscriptionInfo> {
+            self.post_json(
+                &POST_CREDENTIALS_CLAUDE_DESKTOP_SUBSCRIPTION_REFRESH,
+                POST_CREDENTIALS_CLAUDE_DESKTOP_SUBSCRIPTION_REFRESH.path,
+                body,
             )
             .await
         }

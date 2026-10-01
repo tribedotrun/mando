@@ -30,6 +30,7 @@ pub async fn start_runtime_services(state: &AppState, options: RuntimeStartOptio
     }
 
     state.captain.start_background_loops();
+    start_subscription_refresh(state);
     state.scout.resume_pending_items().await;
 
     if options.start_telegram {
@@ -47,6 +48,35 @@ pub async fn start_runtime_services(state: &AppState, options: RuntimeStartOptio
             "telegram disabled via startup options"
         );
     }
+}
+
+fn start_subscription_refresh(state: &AppState) {
+    let settings = state.settings.clone();
+    let bus = state.bus.clone();
+    let cancel = state.cancellation_token.clone();
+    state.task_tracker.spawn(async move {
+        // First tick runs immediately. Persisted attempts govern the daily
+        // cadence, including failed attempts and daemon restarts.
+        let mut ticks = tokio::time::interval(std::time::Duration::from_secs(60));
+        ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            tokio::select! {
+                _ = cancel.cancelled() => break,
+                _ = ticks.tick() => {
+                    tokio::select! {
+                        _ = cancel.cancelled() => break,
+                        result = settings.refresh_due_claude_subscriptions() => {
+                            match result {
+                                Ok(true) => bus.send(global_bus::BusPayload::Credentials(None)),
+                                Ok(false) => {},
+                                Err(error) => tracing::error!(module="claude-subscription", %error, "Daily subscription refresh failed"),
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    });
 }
 
 pub struct GatewayBootstrap {
@@ -164,6 +194,7 @@ pub async fn bootstrap_gateway(
         listen_port,
         task_tracker,
         cancellation_token,
+        http_drain: CancellationToken::new(),
         telegram_runtime,
         ui_runtime,
     };

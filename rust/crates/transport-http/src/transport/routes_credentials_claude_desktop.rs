@@ -9,6 +9,24 @@ pub(crate) fn claude_desktop_routes() -> ApiRouter<AppState> {
     let router = ApiRouter::new();
     let router = crate::api_route!(
         router,
+        POST "/api/credentials/claude/desktop/subscription/refresh",
+        transport = Json,
+        auth = Protected,
+        handler = refresh_subscription,
+        body = api_types::ClaudeDesktopProfileRequest,
+        res = api_types::ClaudeSubscriptionInfo
+    );
+    let router = crate::api_route!(
+        router,
+        POST "/api/credentials/claude/desktop/authorize-keychain",
+        transport = Json,
+        auth = Protected,
+        handler = authorize_keychain,
+        body = api_types::EmptyRequest,
+        res = api_types::ClaudeDesktopKeychainAuthorization
+    );
+    let router = crate::api_route!(
+        router,
         GET "/api/credentials/claude/desktop/status",
         transport = Json,
         auth = Protected,
@@ -73,6 +91,33 @@ async fn status(
         .await
         .map(Json)
         .map_err(map_error)
+}
+
+async fn refresh_subscription(
+    State(state): State<AppState>,
+    Json(body): Json<api_types::ClaudeDesktopProfileRequest>,
+) -> Result<Json<api_types::ClaudeSubscriptionInfo>, ApiError> {
+    let result = state
+        .settings
+        .refresh_claude_subscription(body.credential_id)
+        .await
+        .map_err(map_error)?;
+    state.bus.send(global_bus::BusPayload::Credentials(None));
+    Ok(Json(result))
+}
+
+async fn authorize_keychain(
+    State(state): State<AppState>,
+    Json(_body): Json<api_types::EmptyRequest>,
+) -> Result<Json<api_types::ClaudeDesktopKeychainAuthorization>, ApiError> {
+    state
+        .settings
+        .authorize_claude_desktop_keychain()
+        .await
+        .map_err(map_error)?;
+    Ok(Json(api_types::ClaudeDesktopKeychainAuthorization {
+        authorized: true,
+    }))
 }
 async fn setup(
     State(state): State<AppState>,

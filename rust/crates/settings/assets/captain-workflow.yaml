@@ -67,8 +67,8 @@ agent:
   # Shared by worker, clarifier, review, merge, and rebase. Resumed workers
   # retain their persisted model while inheriting the current reasoning effort.
   codex:
-    model: "gpt-6-astra"
-    reasoning_effort: "medium"
+    model: "gpt-6.1-sol"
+    reasoning_effort: "high"
   # Thinking effort sent as `--effort` on captain's own Claude Code spawns:
   # workers, clarifiers, review and merge sessions. Scout and ops spawns do
   # not read this key — they take `CcConfig`'s built-in default, which is the
@@ -587,7 +587,7 @@ stream_symptoms:
     reason: rate_limit_aborted
     broken_session: true
     clauses:
-      # Observed: "You've hit your limit · resets 10am (America/Mexico_City)"
+      # Example: "You've hit your limit · resets 10am (UTC)"
       # (54/54 real rate-limit result events in corpus).
       # `rate limit` is safe now that matching is scoped to terminal result
       # event text only — the worker-86-2 FP came from skill-template text

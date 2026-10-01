@@ -33,6 +33,17 @@ arc-swap.workspace = true
 base64 = "0.22"
 libc = "0.2"
 tempfile = "3"
+aes = "0.8"
+cbc = "0.1"
+pbkdf2 = "0.12"
+sha1 = "0.10"
+sha2 = "0.10"
+wreq = { version = "0.15.3", features = ["stream"] }
+zeroize = "1.8"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+core-foundation = "0.10"
+security-framework-sys = "2.17"
 
 [lints]
 workspace = true

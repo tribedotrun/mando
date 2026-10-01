@@ -11,6 +11,7 @@ import type { CredentialInfo } from '#renderer/domains/settings/runtime/hooks';
 import { Switch } from '#renderer/global/ui/primitives/switch';
 import { useCredentialCliEligibility } from '#renderer/domains/settings/runtime/useFeedbackCredentials';
 import { ClaudeDesktopProfileControls } from '#renderer/domains/settings/ui/SettingsAccountsParts/ClaudeDesktopProfileControls';
+import { ClaudeSubscriptionDetails } from '#renderer/domains/settings/ui/SettingsAccountsParts/ClaudeSubscriptionDetails';
 import type { CredentialRouteCandidate } from '#shared/daemon-contract';
 
 interface ClaudeCredentialRowProps {
@@ -40,7 +41,11 @@ export function ClaudeCredentialRow({
           <div className="flex items-center gap-2">
             <span className="truncate text-sm font-medium text-foreground">{cred.label}</span>
             <StatusBadge cred={cred} />
-            <CredentialExpiry expiresAt={cred.expiresAt} />
+            {cred.expiresAt != null ? (
+              <span className="text-xs text-muted-foreground">
+                Token: <CredentialExpiry expiresAt={cred.expiresAt} />
+              </span>
+            ) : null}
           </div>
           <TokenDisplay cred={cred} />
         </div>
@@ -53,6 +58,7 @@ export function ClaudeCredentialRow({
           setDisabledPending={setDisabledPending}
         />
       </div>
+      <ClaudeSubscriptionDetails cred={cred} />
       <CredentialUsage cred={cred} />
       {leaseCount ? (
         <p

@@ -92,6 +92,8 @@ pub struct CredentialInfo {
     pub cost_since_probe_usd: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub codex: Option<CodexInfo>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub claude_subscription: Option<api_types::ClaudeSubscriptionInfo>,
 }
 
 impl CredentialRow {
@@ -144,6 +146,7 @@ impl CredentialRow {
             last_probed_at: self.last_probed_at,
             cost_since_probe_usd: None,
             codex,
+            claude_subscription: None,
         }
     }
 }
