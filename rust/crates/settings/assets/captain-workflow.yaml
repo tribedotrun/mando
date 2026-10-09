@@ -186,7 +186,7 @@ prompts:
     `mando todo evidence after.png demo.webm --caption "..." --caption "..."`
     One `--caption` per file, positional. No `--kind` tag is needed on captures.
 
-    Build the deck with the `tool-html-deck` skill; if this repo does not have it, read `~/.claude/skills/tool-html-deck/SKILL.md` and use its template and build.py from there. Put the deck at `.ai/evidence/deck.html` in the worktree with the media files beside it (relative `src`). The deck tells the review story: what was asked, what changed, and the captures proving it works end-to-end — embed the screenshots, reference recordings by filename with a representative frame. This deck is the only thing the human looks at to judge the quality of your work — write it accordingly. Before finishing, open your own captures; if they do not clearly show the change working, fix and recapture.
+    Build the deck with the repo's HTML deck skill when it has one; otherwise hand-write one self-contained `deck.html`. Put the deck at `.ai/evidence/deck.html` in the worktree with the media files beside it (relative `src`). The deck tells the review story: what was asked, what changed, and the captures proving it works end-to-end — embed the screenshots, reference recordings by filename with a representative frame. This deck is the only thing the human looks at to judge the quality of your work — write it accordingly. Before finishing, open your own captures; if they do not clearly show the change working, fix and recapture.
 
   _bug_fix_protocol: |
     {% if is_bug_fix %}
