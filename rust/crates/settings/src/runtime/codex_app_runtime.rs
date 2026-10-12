@@ -111,7 +111,13 @@ impl SettingsRuntime {
         let paths = CodexAppPaths::resolve(codex_home);
         let mut state = load_state(&paths)?;
 
-        codex_app_process::quit_chatgpt_app().await?;
+        let desktop_profiles = codex_app_process::quit_chatgpt_app(
+            paths
+                .slot
+                .parent()
+                .context("Missing Codex credential home")?,
+        )
+        .await?;
         let mut warnings = Vec::new();
         for warning in codex_app_process::external_codex_process_warnings(caller_pid).await {
             push_warning(&mut warnings, warning);
@@ -140,7 +146,7 @@ impl SettingsRuntime {
         state.account_id = Some(pick.account_id.clone());
         save_state(&paths, &state)?;
 
-        if let Some(warning) = codex_app_process::relaunch_chatgpt_app().await {
+        if let Some(warning) = codex_app_process::relaunch_chatgpt_app(&desktop_profiles).await {
             push_warning(&mut warnings, warning);
         }
 
@@ -176,7 +182,13 @@ impl SettingsRuntime {
         let credential_id = state.credential_id;
         let label = state.label.clone();
 
-        codex_app_process::quit_chatgpt_app().await?;
+        let desktop_profiles = codex_app_process::quit_chatgpt_app(
+            paths
+                .slot
+                .parent()
+                .context("Missing Codex credential home")?,
+        )
+        .await?;
 
         let mut warnings = Vec::new();
         if let Some(credential_id) = credential_id {
@@ -202,7 +214,7 @@ impl SettingsRuntime {
         state.stash_auth_json = Some(stash);
         save_state(&paths, &state)?;
 
-        if let Some(warning) = codex_app_process::relaunch_chatgpt_app().await {
+        if let Some(warning) = codex_app_process::relaunch_chatgpt_app(&desktop_profiles).await {
             push_warning(&mut warnings, warning);
         }
 
