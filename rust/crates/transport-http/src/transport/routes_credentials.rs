@@ -243,7 +243,7 @@ async fn update_cli_eligibility(
         }
         Ok(false) => Err(error_response(
             StatusCode::NOT_FOUND,
-            "Claude credential not found",
+            "Credential not found",
         )),
         Err(e) => Err(internal_error(e, "failed to update CLI eligibility")),
     }

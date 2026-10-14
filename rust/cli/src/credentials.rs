@@ -43,6 +43,16 @@ pub(crate) enum CredentialsCommand {
         /// Credential database id.
         id: i64,
     },
+    /// Exclude a credential from automatic CLI/app-server picks; allow explicit use.
+    DisableCli {
+        /// Credential database id.
+        id: i64,
+    },
+    /// Allow automatic selection of a credential for CLI/app-server workers.
+    EnableCli {
+        /// Credential database id.
+        id: i64,
+    },
     /// Pick the best-available credential right now and emit shell exports
     /// or unsets for ambient login. Launchers must check the exit status before eval.
     Pick {
@@ -69,6 +79,8 @@ pub(crate) async fn handle(args: CredentialsArgs) -> Result<()> {
         CredentialsCommand::List => handle_list().await,
         CredentialsCommand::Disable { id } => handle_set_disabled(id, true).await,
         CredentialsCommand::Enable { id } => handle_set_disabled(id, false).await,
+        CredentialsCommand::DisableCli { id } => handle_set_cli_eligible(id, false).await,
+        CredentialsCommand::EnableCli { id } => handle_set_cli_eligible(id, true).await,
         CredentialsCommand::Pick {
             codex,
             id,
@@ -137,8 +149,8 @@ async fn handle_list() -> Result<()> {
     }
 
     println!(
-        "{:<4} {:<10} {:<24} {:<14} {:>6}  TOKEN",
-        "ID", "PROVIDER", "LABEL", "STATE", "5H%"
+        "{:<4} {:<10} {:<24} {:<14} {:<8} {:>6}  TOKEN",
+        "ID", "PROVIDER", "LABEL", "STATE", "AUTO CLI", "5H%"
     );
     for cred in &result.credentials {
         let state = if cred.is_disabled {
@@ -160,10 +172,35 @@ async fn handle_list() -> Result<()> {
             api_types::CredentialProvider::Claude => "claude",
         };
         println!(
-            "{:<4} {:<10} {:<24} {:<14} {:>6}  {}",
-            cred.id, provider, cred.label, state, util, cred.token_masked
+            "{:<4} {:<10} {:<24} {:<14} {:<8} {:>6}  {}",
+            cred.id,
+            provider,
+            cred.label,
+            state,
+            if cred.cli_eligible {
+                "enabled"
+            } else {
+                "disabled"
+            },
+            util,
+            cred.token_masked
         );
     }
+    Ok(())
+}
+
+async fn handle_set_cli_eligible(id: i64, eligible: bool) -> Result<()> {
+    let client = DaemonClient::discover()?;
+    client
+        .patch_credentials_by_id_clieligibility(
+            &api_types::CredentialIdParams { id },
+            &api_types::UpdateCredentialCliEligibilityRequest {
+                cli_eligible: eligible,
+            },
+        )
+        .await?;
+    let state = if eligible { "enabled" } else { "disabled" };
+    println!("Credential {id}: automatic CLI/app-server selection {state}; explicit and Desktop use remain available.");
     Ok(())
 }
 

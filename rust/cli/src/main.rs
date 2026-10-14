@@ -81,7 +81,7 @@ enum Commands {
     Tasks(TasksArgs),
     /// Show system health (daemon, workers, config)
     Health(HealthArgs),
-    /// Manage and inspect Claude credentials (multi-account pool)
+    /// Manage and inspect Claude and Codex credentials (multi-account pool)
     Credentials(credentials::CredentialsArgs),
     /// Codex desktop-app account swap (ChatGPT app shared auth.json slot)
     Codex(codex_app::CodexArgs),

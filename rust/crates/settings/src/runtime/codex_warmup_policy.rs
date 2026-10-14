@@ -18,7 +18,7 @@ pub const CODEX_WARMUP_MIN_INTERVAL_SECS: i64 = 5 * 60 * 60;
 /// with no usage clock running, and no warm-up has run within the last
 /// window length.
 pub fn codex_warmup_due(row: &CredentialRow, snapshot: &UsageSnapshot, now_secs: i64) -> bool {
-    if row.provider != "codex" || row.disabled_at.is_some() {
+    if row.provider != "codex" || row.disabled_at.is_some() || !row.cli_eligible {
         return false;
     }
     if matches!(snapshot.unified_status, RateLimitStatus::Rejected) {

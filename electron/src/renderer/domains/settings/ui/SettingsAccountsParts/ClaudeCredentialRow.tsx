@@ -73,13 +73,16 @@ export function ClaudeCredentialRow({
       <label className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
         <Switch
           size="sm"
-          aria-label={`Use ${cred.label} for CLI`}
+          aria-label={`Automatically select ${cred.label} for CLI`}
           checked={cred.cliEligible}
           disabled={cliEligibility.isPending}
           onCheckedChange={(cliEligible) => cliEligibility.mutate({ id: cred.id, cliEligible })}
         />
-        Use for CLI and worker load balancing
+        Automatically select for CLI and worker load balancing
       </label>
+      <p className="mt-1 text-xs text-muted-foreground">
+        You can still select this account explicitly or use it in the desktop app.
+      </p>
       <ClaudeDesktopProfileControls credentialId={cred.id} />
       {showTokenEditor ? (
         <UpdateCredentialTokenForm

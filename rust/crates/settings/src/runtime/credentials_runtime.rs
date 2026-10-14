@@ -237,7 +237,7 @@ impl SettingsRuntime {
         if row.provider != "claude" {
             return Ok(None);
         }
-        if row.disabled_at.is_some() || !row.cli_eligible {
+        if row.disabled_at.is_some() {
             return Ok(None);
         }
         Ok(Some((resolved_id, row.access_token, row.label)))

@@ -332,7 +332,7 @@ impl SettingsRuntime {
             if row.provider != "codex" {
                 return Err(CodexCredentialError::NotCodex);
             }
-            if row.disabled_at.is_some() {
+            if row.disabled_at.is_some() || !row.cli_eligible {
                 continue;
             }
 
@@ -351,6 +351,9 @@ impl SettingsRuntime {
             let row = credentials::get_row_by_id(&self.db_pool, id)
                 .await?
                 .ok_or(CodexCredentialError::NotFound(id))?;
+            if row.disabled_at.is_some() || !row.cli_eligible {
+                continue;
+            }
             let Some(refresh_token) = row.refresh_token.as_deref() else {
                 warn!(
                     module = "settings",

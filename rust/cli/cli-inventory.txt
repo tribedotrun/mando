@@ -20,7 +20,9 @@ mando codex app-status	--json
 mando codex app-use	
 mando credentials	
 mando credentials disable	
+mando credentials disable-cli	
 mando credentials enable	
+mando credentials enable-cli	
 mando credentials list	
 mando credentials pick	--codex,--id,--label,-a/--account
 mando credentials sync-codex	

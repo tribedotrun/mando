@@ -180,11 +180,11 @@ pub async fn set_disabled(pool: &SqlitePool, id: i64, disabled: bool) -> Result<
     Ok(get_row_by_id(pool, id).await?.is_some())
 }
 
-/// Control Claude CLI pool participation independently of Desktop availability.
+/// Control CLI pool participation independently of Desktop availability.
 pub async fn set_cli_eligible(pool: &SqlitePool, id: i64, eligible: bool) -> Result<bool> {
     let result = sqlx::query(
         "UPDATE credentials SET cli_eligible = ?1, updated_at = datetime('now')
-         WHERE id = ?2 AND provider = 'claude'",
+         WHERE id = ?2 AND provider IN ('claude', 'codex')",
     )
     .bind(eligible)
     .bind(id)
@@ -396,6 +396,7 @@ pub async fn pick_for_codex_candidates(pool: &SqlitePool) -> Result<Vec<(i64, St
          WHERE c.provider = 'codex'
            AND c.account_id IS NOT NULL
            AND c.disabled_at IS NULL
+           AND c.cli_eligible = 1
            AND (c.expires_at IS NULL OR c.expires_at > ?1)
            AND (c.rate_limit_cooldown_until IS NULL OR c.rate_limit_cooldown_until <= ?2)
          ORDER BY

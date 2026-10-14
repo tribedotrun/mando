@@ -46,11 +46,11 @@ fn weekly_reset(row: &CredentialRow, model: Option<&str>, now: i64) -> Option<i6
     .min()
 }
 
-fn unavailable(row: &CredentialRow, now: i64) -> Option<&'static str> {
+fn unavailable(row: &CredentialRow, now: i64, explicit: bool) -> Option<&'static str> {
     if row.disabled_at.is_some() {
         Some("profile disabled")
-    } else if !row.cli_eligible {
-        Some("profile excluded from CLI")
+    } else if !explicit && !row.cli_eligible {
+        Some("profile excluded from automatic selection")
     } else if row.expires_at.is_some_and(|t| t <= now * 1000) {
         Some("credential expired")
     } else if row.rate_limit_cooldown_until.is_some_and(|t| t > now) {
@@ -86,7 +86,7 @@ fn candidate(
         Some("current profile")
     } else if request.profile.as_ref().is_some_and(|p| p != &row.label) {
         Some("different explicit profile")
-    } else if let Some(reason) = unavailable(row, now) {
+    } else if let Some(reason) = unavailable(row, now, request.profile.is_some()) {
         Some(reason)
     } else if stale(row, now, request.model.as_deref()) {
         Some("usage refresh required")
@@ -208,7 +208,7 @@ async fn refresh_candidates(pool: &SqlitePool, request: &CredentialRouteRequest)
     let mut rows = credentials::list_all(pool).await?;
     rows.retain(|r| {
         r.provider == "claude"
-            && unavailable(r, now).is_none()
+            && unavailable(r, now, request.profile.is_some()).is_none()
             && request.profile.as_ref().is_none_or(|p| p == &r.label)
             && (request.profile.is_some() || request.current_credential_id != Some(r.id))
     });

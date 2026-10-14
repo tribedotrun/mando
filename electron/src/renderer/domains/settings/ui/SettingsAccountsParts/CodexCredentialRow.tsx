@@ -9,6 +9,8 @@ import {
 } from '#renderer/domains/settings/ui/SettingsAccountsParts';
 import { CredentialUsage } from '#renderer/domains/settings/ui/CredentialUsage';
 import type { CredentialInfo } from '#renderer/domains/settings/runtime/hooks';
+import { useCredentialCliEligibility } from '#renderer/domains/settings/runtime/useFeedbackCredentials';
+import { Switch } from '#renderer/global/ui/primitives/switch';
 
 interface CodexCredentialRowProps {
   cred: CredentialInfo;
@@ -26,6 +28,7 @@ export function CodexCredentialRow({
   setDisabledPending,
 }: CodexCredentialRowProps): React.ReactElement {
   const [showAuthEditor, setShowAuthEditor] = useState(false);
+  const cliEligibility = useCredentialCliEligibility();
 
   return (
     <div className="rounded-lg border border-border bg-background px-4 py-3">
@@ -56,6 +59,19 @@ export function CodexCredentialRow({
         </div>
       </div>
       <CredentialUsage cred={cred} />
+      <label className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
+        <Switch
+          size="sm"
+          aria-label={`Automatically select ${cred.label} for CLI and app-server`}
+          checked={cred.cliEligible}
+          disabled={cliEligibility.isPending}
+          onCheckedChange={(cliEligible) => cliEligibility.mutate({ id: cred.id, cliEligible })}
+        />
+        Automatically select for CLI and app-server workers
+      </label>
+      <p className="mt-1 text-xs text-muted-foreground">
+        You can still select this account explicitly or use it in the desktop app.
+      </p>
       {showAuthEditor ? (
         <UpdateCodexCredentialAuthForm
           credentialId={cred.id}

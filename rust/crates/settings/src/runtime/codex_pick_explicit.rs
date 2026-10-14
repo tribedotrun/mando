@@ -11,15 +11,38 @@ use super::codex_pick_helpers;
 use super::codex_pick_refresh::{refresh_codex_access_token_on_pick, PickRefreshOutcome};
 use super::settings_runtime::SettingsRuntime;
 
+#[derive(Clone, Copy)]
+enum CodexPickPurpose {
+    Explicit,
+    Warmup,
+}
+
+impl CodexPickPurpose {
+    fn allows(&self, row: &credentials::CredentialRow) -> bool {
+        row.disabled_at.is_none() && (matches!(self, Self::Explicit) || row.cli_eligible)
+    }
+}
+
 impl SettingsRuntime {
     /// Pick a specific Codex credential by id or label. Honors the caller's
     /// explicit choice even when the row is expired or rate-limited, but never
-    /// selects a manually disabled credential.
+    /// selects a manually disabled credential. Automatic-selection eligibility
+    /// does not restrict an explicit choice.
     #[tracing::instrument(skip(self))]
     pub async fn pick_codex_credential_explicit(
         &self,
         id: Option<i64>,
         label: Option<&str>,
+    ) -> Result<Option<PickedCodexCredential>, CodexCredentialError> {
+        self.pick_codex_for_purpose(id, label, CodexPickPurpose::Explicit)
+            .await
+    }
+
+    async fn pick_codex_for_purpose(
+        &self,
+        id: Option<i64>,
+        label: Option<&str>,
+        purpose: CodexPickPurpose,
     ) -> Result<Option<PickedCodexCredential>, CodexCredentialError> {
         let resolved_id = self
             .resolve_credential_pick_id(id, label)
@@ -35,13 +58,13 @@ impl SettingsRuntime {
         if row.provider != "codex" {
             return Ok(None);
         }
-        if row.disabled_at.is_some() {
+        if !purpose.allows(&row) {
             return Ok(None);
         }
         let Some(account_id) = row.account_id.clone() else {
             return Ok(None);
         };
-        self.materialize_codex_pick(resolved_id, row.access_token, account_id, true)
+        self.materialize_codex_pick(resolved_id, row.access_token, account_id, purpose)
             .await
     }
 
@@ -63,7 +86,7 @@ impl SettingsRuntime {
         let Some(account_id) = row.account_id.clone() else {
             return Err(CodexCredentialError::NoAccountId);
         };
-        self.materialize_codex_pick(id, row.access_token, account_id, false)
+        self.materialize_codex_pick(id, row.access_token, account_id, CodexPickPurpose::Warmup)
             .await
     }
 
@@ -72,7 +95,7 @@ impl SettingsRuntime {
         id: i64,
         access_token: String,
         account_id: String,
-        record_pick: bool,
+        purpose: CodexPickPurpose,
     ) -> Result<Option<PickedCodexCredential>, CodexCredentialError> {
         let row = credentials::get_row_by_id(&self.db_pool, id)
             .await?
@@ -80,7 +103,7 @@ impl SettingsRuntime {
         if row.provider != "codex" {
             return Err(CodexCredentialError::NotCodex);
         }
-        if row.disabled_at.is_some() {
+        if !purpose.allows(&row) {
             return Ok(None);
         }
 
@@ -101,6 +124,9 @@ impl SettingsRuntime {
         let row = credentials::get_row_by_id(&self.db_pool, id)
             .await?
             .ok_or(CodexCredentialError::NotFound(id))?;
+        if !purpose.allows(&row) {
+            return Ok(None);
+        }
         let Some(refresh_token) = row.refresh_token.as_deref() else {
             warn!(
                 module = "settings",
@@ -119,7 +145,7 @@ impl SettingsRuntime {
         )
         .map_err(|e| CodexCredentialError::Db(anyhow::Error::msg(e.to_string())))?;
 
-        if record_pick {
+        if !matches!(purpose, CodexPickPurpose::Warmup) {
             credentials::record_codex_pick(&self.db_pool, id).await?;
         }
         Ok(Some(PickedCodexCredential {
